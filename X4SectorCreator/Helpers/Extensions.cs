@@ -5,6 +5,8 @@ using System.Numerics;
 using System.Text;
 using X4SectorCreator.Configuration;
 using X4SectorCreator.CustomComponents;
+using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
+using X4SectorCreator.Objects;
 
 namespace X4SectorCreator.Helpers
 {
@@ -339,6 +341,31 @@ namespace X4SectorCreator.Helpers
             return new Point(p1.X - p2.X, p1.Y - p2.Y);
         }
 
+        // Easier conversion point/tuple
+        public static (int, int) ToTuple(this Point p)
+        {
+            return (p.X, p.Y);
+        }
+
+        // Snapping functionality so we don't have to worry about the weird coord system.
+        public static Point FitToHex(this Point target, GraphDirection bias = GraphDirection.Right)
+        {
+            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
+            {
+                target.Y += 1;
+            }
+            return target;
+
+            //int biasX = bias == GraphDirection.Left ? -1 : +1;
+            //int biasY = bias == GraphDirection.Down ? -1 : +1;
+            //if (target.X % 2 == 0)
+            //{
+            //    if (target.Y % 2 != 0) target.Y += biasY;
+            //}
+            //else if (target.Y % 2 == 0) target.X += biasX;
+            //return target;
+        }
+
         public static double GetDirectionAngleCompassStyle(this Point a, Point b)
         {
             int dx = b.X - a.X;
@@ -433,5 +460,49 @@ namespace X4SectorCreator.Helpers
         }
 
         public static T Pick<T>(this T[] array, Random random) => array[random.Next(array.Length)];
+
+        //Reverse Dictionary lookup
+        public static IEnumerable<TKey> ReverseLookup<TKey, TValue>(this IDictionary<TKey, TValue> source, TValue sample)
+        {
+            var comparer = EqualityComparer<TValue>.Default;
+            return source.Where(e => comparer.Equals(e.Value, sample)).Select(e => e.Key);
+        }
+
+        //Tuple to Dictionary entry
+        public static KeyValuePair<TKey, TValue> ToKeyValuePair<TKey, TValue>(this (TKey Key, TValue Value) tuple)
+        {
+            return KeyValuePair.Create(tuple.Key, tuple.Value);
+        }
+
+        //Easier way to add to lists safely
+        public static void AddUnique<T>(this List<T> list, T obj)
+        {
+            if (!list.Contains(obj))
+            {
+                list.Add(obj);
+            }
+        }
+
+        public static void AddRangeUnique<T>(this List<T> list, List<T> range)
+        {
+            foreach (var item in range)
+            {
+                if (!list.Contains(item))
+                {
+                    list.Add(item);
+                }
+            }
+        }
+
+        public static void AddRangeUnique<T>(this List<T> list, IEnumerable<T> range)
+        {
+            foreach (var item in range)
+            {
+                if (!list.Contains(item))
+                {
+                    list.Add(item);
+                }
+            }
+        }
     }
 }

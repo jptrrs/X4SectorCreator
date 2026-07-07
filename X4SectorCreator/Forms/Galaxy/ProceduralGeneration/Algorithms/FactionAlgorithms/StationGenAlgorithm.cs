@@ -28,7 +28,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.FactionAl
             foreach (var faction in main)
             {
                 var sector = GetBestStartingSector(availableSectors, clusters, factionSectors, faction);
-                factionSectors[sector] = faction;
+                if (sector != null) factionSectors[sector] = faction;
                 availableSectors.Remove(sector);
             }
 
@@ -247,7 +247,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.FactionAl
 
         private void ExpandFactionTerritory(Faction faction, Dictionary<Sector, Faction> factionSectors, List<Sector> sectors, List<Cluster> clusters)
         {
-            var startSector = factionSectors.First(a => a.Value == faction).Key;
+            var startSector = factionSectors.First(a => a.Value == faction).Key ?? null;
+            if (startSector == null) return;
             var expansionQueue = new Queue<Sector>();
             var ownedSectors = new HashSet<Sector> { startSector };
             expansionQueue.Enqueue(startSector);

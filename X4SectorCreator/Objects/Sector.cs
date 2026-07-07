@@ -22,6 +22,9 @@ namespace X4SectorCreator.Objects
         public SectorPlacement Placement { get; set; }
 
         [JsonIgnore]
+        public int AssignedTerritoryId = -1;
+
+        [JsonIgnore]
         public Point PlacementDirection => DeterminePlacementDirection();
 
         [JsonIgnore]
@@ -33,6 +36,9 @@ namespace X4SectorCreator.Objects
         [JsonIgnore]
         public bool IsBaseGame => !string.IsNullOrWhiteSpace(BaseGameMapping);
 
+        [JsonIgnore]
+        public bool IsNeutral => Owner == null || Owner.Equals("None", StringComparison.Ordinal);
+        
         private Point DeterminePlacementDirection()
         {
             return Placement switch
@@ -151,6 +157,13 @@ namespace X4SectorCreator.Objects
         {
             return Name ?? "Unknown";
         }
+
+        //A bit of self-awareness
+        public Cluster FindCluster()
+        {
+            return MainForm.Instance.AllClusters.Values
+                    .FirstOrDefault(cluster => cluster.Sectors.Contains(this));
+        }
     }
 
     public enum SectorPlacement
@@ -164,4 +177,6 @@ namespace X4SectorCreator.Objects
         MiddleTop,
         MiddleBottom,
     }
+
+
 }

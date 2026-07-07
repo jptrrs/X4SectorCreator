@@ -117,5 +117,33 @@ namespace X4SectorCreator.Objects
                 Yaw = Yaw
             };
         }
+
+        //A bit of self-awareness
+        public Cluster FindDestinationCluster()
+        {
+            Cluster result;
+            FindDestination(out result);
+            return result;
+        }
+
+        public Sector FindDestination(out Cluster cluster)
+        {
+            //Replaced LINQ with a foreach loop so we can extract both sector and cluster in one go.
+            //Could probably be optimized if we avoided searching for strings, but I'm leaving the criteria as is for now.
+            var result = new Sector();
+            var Pcluster = new Cluster();
+            foreach (var c in MainForm.Instance.AllClusters.Values)
+            {
+                var Psector = c.Sectors.Find(x => x.Name.Equals(DestinationSectorName, StringComparison.OrdinalIgnoreCase));
+                if (Psector != null)
+                {
+                    Pcluster = c;
+                    result = Psector; 
+                    break;
+                }
+            }
+            cluster = Pcluster;
+            return result;
+        }
     }
 }

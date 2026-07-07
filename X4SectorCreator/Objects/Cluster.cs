@@ -1,6 +1,8 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Linq;
+using System.Text.Json.Serialization;
 using X4SectorCreator.Forms;
 using X4SectorCreator.Helpers;
+using static X4SectorCreator.Objects.Job;
 
 namespace X4SectorCreator.Objects
 {
@@ -26,11 +28,77 @@ namespace X4SectorCreator.Objects
 	</component>
 </components>";
 
+        internal bool shuffled = false;
+        internal List<Sector> Destinations = new List<Sector>();
+        internal Dictionary<Sector, List<(Gate, Sector)>> Exits = new Dictionary<Sector, List<(Gate, Sector)>>();
+        internal List<int> BridgeFor = new List<int>();
+        internal Point AnchorOffset = new Point();
+
+        [JsonIgnore]
+        public int AssignedTerritoryId {
+            get
+            {
+                return assignedTerritoryId;
+            }
+            set
+            {
+                assignedTerritoryId = value;
+                if (Sectors.Any())
+                {
+                    foreach (var sector in Sectors)
+                    {
+                        sector.AssignedTerritoryId = value;
+                    }
+                }
+            }
+        }
+
+        private int assignedTerritoryId = -1;
+        
         [JsonIgnore]
         public Hexagon Hexagon { get; set; }
 
         [JsonIgnore]
-        public bool IsBaseGame => !string.IsNullOrWhiteSpace(BaseGameMapping);
+        public bool IsBaseGame => !shuffled && !string.IsNullOrWhiteSpace(BaseGameMapping);
+
+        [JsonIgnore]
+        public List<(Sector origin, Gate gate, Sector destination)> ExitPoints
+        {
+            get
+            {
+                var roads = new List<(Sector, Gate, Sector)>();
+                foreach (var sector in Exits.Keys)
+                {
+                    foreach (var exit in Exits[sector])
+                    {
+                        roads.Add((sector, exit.Item1, exit.Item2));
+                    }
+                }
+                return roads;
+            }
+            set
+            {
+                Exits.Clear();
+                Destinations.Clear();
+                foreach (var item in value)
+                {
+                    if (item.Item1 == null || item.Item2 == null || item.Item3 == null) continue;
+                    var sector = item.Item1;
+                    var gate = item.Item2;
+                    var dest = item.Item3;
+                    Destinations.AddUnique(dest);
+                    if (Exits.ContainsKey(sector))
+                    {
+                        Exits[sector].AddUnique((gate, dest));
+                    }
+                    else
+                    {
+                        Exits.Add(sector, new List<(Gate, Sector)> { (gate, dest) });
+                    }
+                }
+            }
+        }
+
 
         public void AutoPositionSectors(bool randomize = false, Random random = null)
         {
@@ -75,6 +143,20 @@ namespace X4SectorCreator.Objects
         public override string ToString()
         {
             return Name ?? "Unknown";
+        }
+
+        //A bit of self-awareness
+        internal List<Gate> FindGates()
+        {
+            List<Gate> result = new List<Gate>();
+            foreach (var sector in Sectors)
+            {
+                foreach (var zone in sector.Zones)
+                {
+                    result.AddRange(zone.Gates);
+                }
+            }
+            return result;
         }
     }
 

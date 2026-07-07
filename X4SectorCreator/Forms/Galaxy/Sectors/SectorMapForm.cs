@@ -509,7 +509,6 @@ namespace X4SectorCreator
 
             if (resetLegendTree)
                 SetupLegendTree();
-
             GenerateHexagons();
             Invalidate();
         }
@@ -1404,6 +1403,21 @@ namespace X4SectorCreator
                 RenderClusters(e, new KeyValuePair<(int, int), Hexagon>((cluster.Position.X, cluster.Position.Y), cluster.Hexagon), out invalid);
                 if (invalid) return;
             }
+
+
+            //bugcheck
+            //var checklist = new List<Cluster>();
+            //var count = 0;
+            //foreach (var entry in MainForm.Instance.AllClusters)
+            //{
+            //    if (entry.Value.Position.ToTuple() != entry.Key)
+            //    {
+            //        checklist.Add(entry.Value);
+            //        count++;
+            //    }
+            //}
+            //MessageBox.Show($"Coherence check on SectorMap: {count} errors. {string.Join(", ", checklist)}");
+            //MessageBox.Show($"Map RenderAllHexes, _customClusters={_customClusters.Count()}, _hexagons={_hexagons.Count}");
 
             if (IsMapOptionChecked(MapOption.Show_Custom_Sectors))
             {
