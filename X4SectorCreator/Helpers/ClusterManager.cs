@@ -102,5 +102,23 @@ namespace X4SectorCreator.Helpers
             }
             return result;
         }
+
+        public static (int cols, int rows) FrameHexGrid(List<Cluster> allClusters, int margin = 0)
+        {
+            int cols, rows = 0;
+
+            if (allClusters.Count == 0) // Check if the list is empty
+            {
+                cols = (margin * 2) + 1;
+                rows = ((int)(margin / 2 * 1.5f)) + 1;
+            }
+            else
+            {
+                cols = ((Math.Max(Math.Abs(allClusters.Max(a => a.Position.X)), Math.Abs(allClusters.Min(a => a.Position.X))) + margin) * 2) + 1;
+                rows = ((int)((Math.Max(Math.Abs(allClusters.Max(b => b.Position.Y)), Math.Abs(allClusters.Min(b => b.Position.Y))) + (margin / 2)) * 1.5f)) + 1;
+            }
+            return (cols, rows);
+        }
+
     }
 }

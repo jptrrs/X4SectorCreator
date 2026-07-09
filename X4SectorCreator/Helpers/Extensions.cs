@@ -348,22 +348,28 @@ namespace X4SectorCreator.Helpers
         }
 
         // Snapping functionality so we don't have to worry about the weird coord system.
-        public static Point FitToHex(this Point target, Direction bias = Direction.Right)
+        public static Point FitToHex(this Point target, Direction bias = Direction.Up)
         {
             if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
             {
-                target.Y += 1;
+                switch (bias)
+                {
+                    case Direction.Undefined:
+                    case Direction.Up:
+                        target.Y += 1;
+                        break;
+                    case Direction.Down:
+                        target.Y -= 1;
+                        break;
+                    case Direction.Right:
+                        target.X += 1;
+                        break;
+                    case Direction.Left:
+                        target.X -= 1;
+                        break;
+                }
             }
             return target;
-
-            //int biasX = bias == GraphDirection.Left ? -1 : +1;
-            //int biasY = bias == GraphDirection.Down ? -1 : +1;
-            //if (target.X % 2 == 0)
-            //{
-            //    if (target.Y % 2 != 0) target.Y += biasY;
-            //}
-            //else if (target.Y % 2 == 0) target.X += biasX;
-            //return target;
         }
 
         public static double GetDirectionAngleCompassStyle(this Point a, Point b)

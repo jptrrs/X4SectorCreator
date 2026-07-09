@@ -1,4 +1,6 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Diagnostics.Metrics;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
 
@@ -15,21 +17,22 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
     internal class Shuffler
     {
-        internal int gap = 2;
-        internal int occupiedMax = 0;
-        internal string tempReport;
-        internal List<string> tempReportList = new List<string>();
-        internal Dictionary<int, Territory> territories = new Dictionary<int, Territory>();
+        internal const int gap = 2;
+        internal Point occupiedMax;
+        internal Dictionary<int, Territory> territories = [];
+        internal List<Cluster> misplaced = []; 
 
-        private static readonly (int dx, int dy)[] NeighborOffsets = new[]
-        {
+        private static readonly (int dx, int dy)[] NeighborOffsets =
+        [
             (0,  2),
             (0, -2),
             (1,  1),
             (1, -1),
             (-1, 1),
             (-1,-1),
-        };
+        ];
+
+        private static (int cols, int rows) hexGridFrame;
 
         private readonly Func<(Cluster, Cluster), bool> AreConnected = (pair) =>
         {
@@ -58,25 +61,35 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return !territory.Clusters.Contains(cluster);
         };
 
-        private Direction HelixLastDir = Direction.Up;
+        private Direction helixLastDir = Direction.Up;
+
+        private Func<Point, bool> InBounds = p =>
+        {
+            var absX = Math.Abs(p.X);
+            var absY = Math.Abs(p.Y);
+            return absX <= GridFrameBounds.maxX && absY <= GridFrameBounds.maxY;
+        };
 
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
-            //Group clusters into territories based adjacency and DLCs
+            // Gather some basic info
+            hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
+            // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
-            //Map connections for all clusters and register entry points for territories
+            // Map connections for all clusters and register entry points for territories
             FindConnections();
-            //Determine if there are neighboring territories owned by the same faction
+            // Determine if there are neighboring territories owned by the same faction
             FindAnnexed();
-            //Determine if there are other close territories owned by the same faction and separated by only a neutral sector.
+            // Determine if there are other close territories owned by the same faction and separated by only a neutral sector.
             FindCloseColonies();
-            //Shuffle!
+            // Shuffle!
             Shuffle();
-            //Update Map as needed.
+            // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
         }
 
         internal int vertGap => gap * 2;
+        private static (int maxX, int maxY) GridFrameBounds => (hexGridFrame.cols / 2, hexGridFrame.rows / 2);
 
         private Func<Cluster, bool> DLCMatch => cluster =>
         {
@@ -97,17 +110,19 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             cluster.AssignedTerritoryId = territory.Id;
         };
 
+        public static (int dx, int dy)[] NeighborOffsets1 => NeighborOffsets;
+
         internal void CarveTerritories(IEnumerable<Cluster> clusters)
         {
-            var probe = new Dictionary<Territory, float>();
+            var log = new List<string>();
             ClusterManager.Group(clusters, SortTerritory, x => GetNeighbors(x), x => DLCMatch(x), x => AreConnected(x));
             foreach (var territory in territories.Values)
             {
                 territory.SetUpBox();
-                probe.Add(territory, territory.SizeToContentRatio());
+                log.Add($"\n{territory.Id} - {territory.Seed.Name}, {territory.Size.X}x{territory.Size.Y} with {territory.Clusters.Count} clusters");
             }
-            var sorted = probe.OrderByDescending(x => x.Value).Select(e => $"\n{e.Key.Id} - {e.Key.Seed.Name} ({e.Key.Size.X}x{e.Key.Size.Y})/{e.Key.Clusters.Count()} = {e.Value}");
-            _ = LogAsync("CarveTerritories", string.Join(", ", sorted));
+            //logging
+            _ = LogAsync("CarveTerritories", $"\n\n--- Territories ---\n{string.Join("",log)}");
         }
 
         internal void FindAnnexed()
@@ -180,79 +195,82 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         internal void Shuffle()
         {
             //logging
-            //List<string> log = new List<string>();
-            string level = "Shuffle";
-            _ = LogAsync(level, $"\n\n--- Shuffling ---");
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Shuffling ---",true);
 
             //No turning back now!
             MainForm.Instance.AllClusters.Clear();
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            var slots = new OrderedDictionary<Point, (Direction root, Direction dir, bool flip)>() { [new Point(0, 0)] = (Direction.Undefined, Direction.Undefined, false) };
+            var slots = new OrderedDictionary<Point, (Direction root, Direction dir)>() { [new Point(0, 0)] = (Direction.Undefined, Direction.Undefined) };
+            var deferred = new OrderedDictionary<Point, (Direction root, Direction dir)>();
             SortedSet<cPoint> occupied = new SortedSet<cPoint>();
             for (int i = 0; i < cards.Count(); i++)
             {
-                //Select next territory and pick the next spot.
+                //Select next territory and pick the next slot.
                 int card = cards[i];
                 var territory = territories[card];
                 var currentPos = territory.Anchor;
-                var slot = slots.First();
+                if (!slots.Any())
+                {
+                    if (deferred.Any())
+                    {
+                        slots = deferred;
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Bounds reached, spilling over @ #{territory.Id} - {territory.Seed.Name}...");
+                    }
+                    else
+                    {
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: we've run out of slots! #{territory.Id} - {territory.Seed.Name} and beyond can't be placed...", true);
+                        break;
+                    }
+                }
+                var slot =  slots.First();
                 var newPos = slot.Key;
                 var locDir = slot.Value.dir;
                 var rootDir = slot.Value.root;
-                var filp = slot.Value.flip;
-                _ = LogAsync(level, $"Assigning n.{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, slot @ {newPos.ToTuple()}{locDir}...", true);
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, slot @ {newPos.ToTuple()}{locDir}...", true);
 
-                //Predict new position
+                //Fine-tune the insertion spot so it fits right in.
                 var plannedMove = newPos.Subtract(currentPos);
-
-                //Adjust to prevet overlaps & fit hex grid
-                if (i > 0)
-                {
-                    //newPos = AdjustForOverlap(territory, newPos, occupied, locDir, ref report);
-                    newPos = AdjustForInsertionHelix(territory, plannedMove, rootDir, locDir, filp, occupied);
-                }
+                if (i > 0) newPos = AdjustForInsertionHelix(territory, plannedMove, rootDir, locDir, occupied);
 
                 //Move the piece
                 var move = newPos.FitToHex().Subtract(currentPos);
                 var report = territory.Reposition(move);
-                _ = LogAsync(level, $"Moved n.{territory.Id} to {newPos.ToTuple()}...");
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Moved #{territory.Id} to {newPos.ToTuple()}...");
 
                 //Keep track of occupied areas
                 var covered = FillArea(territory);
                 if (i == 0) occupied.Clear();
                 occupied.UnionWith(covered);
-                _ = LogAsync(level, $"{covered.Count} tiles were covered, totalling {occupied.Count} now...");
+                occupiedMax = occupied.Max;
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{covered.Count} tiles were covered, totalling {occupied.Count} now...");
 
-                //Update the board
+                //Update the board.
                 UpdateClusterMap(territory.Clusters, i);
-
-                //Update the slots
+                
+                //Prepare the next slots.
                 slots.RemoveAt(0);
-                var nextSlots = NextSlotsHelix(territory, rootDir, occupied); // Avaliar se 'flip' é util!
-
-                //Finally, add the new slots
-                foreach (var (pos, root, dir, flip) in nextSlots)
+                if (i > 0) CleanArea(covered, ref slots);
+                var nextSlots = NextSlotsHelix(territory, rootDir, occupied);
+                foreach (var (pos, root, dir) in nextSlots)
                 {
-                    if (!slots.ContainsKey(pos))
-                    {
-                        slots.Add(pos, (root, dir, flip));
-                    }
+                    if (InBounds(pos)) slots.Add(pos, (root, dir));
+                    else deferred.Add(pos, (root, dir));
                 }
             }
-            occupiedMax = occupied.Max.X;
+            HandleMisplaced();
         }
 
-        private static void CleanArea(List<cPoint> covered, ref OrderedDictionary<Point, (Direction, Direction, bool)> slots)
+        private static void CleanArea(List<cPoint> covered, ref OrderedDictionary<Point, (Direction root, Direction dir)> slots)
         {
-            List<Point> badSlots = slots.Keys.Where(p => covered.Contains(p)).ToList();
+            List<(Point pos, Direction root, Direction dir)> badSlots = slots.Where(x => covered.Contains(x.Key)).Select(x => (x.Key, x.Value.root, x.Value.dir)).ToList();
             if (badSlots.Count > 0)
             {
-                _ = LogAsync("CleanArea", $"{badSlots.Count()} slots were covered and must be removed: {string.Join(", ", badSlots.Select(x => x.ToTuple()))}.");
+                _ = LogAsync("CleanArea", $"{badSlots.Count} slots were covered and must be removed: {string.Join(", ", badSlots.Select(x => $"{x.pos.ToTuple()}{x.dir} (branch: {x.root})"))}.");
                 foreach (var s in badSlots)
                 {
-                    slots.Remove(s);
+                    slots.Remove(s.pos);
                 }
             }
         }
@@ -264,7 +282,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             await File.AppendAllTextAsync("test.log", logEntry);
         }
 
-        private Point AdjustForInsertionHelix(Territory territory, Point displacement, Direction root, Direction dir, bool flip, SortedSet<cPoint> occupied)
+        private Point AdjustForInsertionHelix(Territory territory, Point displacement, Direction root, Direction dir, SortedSet<cPoint> occupied)
         {
             var position = territory.Anchor.Add(displacement);
             var width = territory.Size.X;
@@ -272,10 +290,10 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             var height = oddHeight + oddHeight % 2;
             var flipX = width - 1;
             var flipY = height - 2;
-
-            Point offset = new Point();
+            var offset = new Point();
             var hits = Enumerable.Empty<Point>();
             int push = 0;
+
             switch (root)
             {
                 case Direction.Undefined:
@@ -327,7 +345,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
             }
             offset = offset.FitToHex();
-            _ = LogAsync("AdjustForInsertionHelix", $"Target for n.{territory.Id} calculated @ {offset.ToTuple()}, pushed {push} tiles {dir} from its slot.");
+            if (push > 0) _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"#{territory.Id} was pushed {push} tiles {dir}, to {offset.ToTuple()}.");
             return offset;
         }
 
@@ -335,10 +353,12 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         {
             var width = territory.Size.X + gap;
             var height = territory.Size.Y + vertGap;
-            return Spread(width, height, coord => new Point(territory.Anchor.X - (gap / 2) + coord.a, territory.Anchor.Y + (vertGap / 2) - coord.b)).Select(x => (cPoint)x).ToList();
+            return Spread(width, height,
+                coord => new Point(territory.Anchor.X - (gap / 2) + coord.a, territory.Anchor.Y + (vertGap / 2) - coord.b).FitToHex())
+                .Select(x => (cPoint)x).ToList();
         }
 
-        private List<(Point pos, Direction rootDir, Direction dir, bool flip)> NextSlotsHelix(Territory territory, Direction rootDir, SortedSet<cPoint> occupied)
+        private List<(Point pos, Direction rootDir, Direction dir)> NextSlotsHelix(Territory territory, Direction rootDir, SortedSet<cPoint> occupied)
         {
             var ax = territory.Anchor.X;
             var ay = territory.Anchor.Y;
@@ -347,47 +367,52 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             var height = oddHeight + oddHeight % 2 - 2;
             bool setRoot = rootDir == Direction.Undefined ? true : false;
             bool firstRun = rootDir == Direction.Undefined;
-            bool quadrant = rootDir != HelixLastDir;
+            bool quadrant = rootDir != helixLastDir;
 
-            var slots = new List<(Point pos, Direction root, Direction dir, bool flip)>();
+            var slots = new List<(Point pos, Direction root, Direction dir)>();
             //logging
             List<string> log = new List<string>();
-            void Select((Point slot, Direction root, Direction dir, bool flip) set)
+            string level = MethodBase.GetCurrentMethod().Name;
+            void Select((Point slot, Direction root, Direction dir) set)
             {
                 if (!occupied.Contains(set.slot))
                 {
                     slots.Add(set);
                     log.Add($"{set.slot.ToTuple().ToString()}{set.dir}");
                 }
+                else
+                {
+                    _ = LogAsync(level, $"{set.slot.ToTuple()}{set.dir} was occupied, slot skipped! Branch: {set.root})");
+                }
             }
 
             //Place future slots, in clockwise order
             if (rootDir == Direction.Right || firstRun)
             {
-                if (quadrant) Select((new Point(ax + width + gap, ay).FitToHex(), setRoot ? Direction.Right : rootDir, Direction.Right, false));
-                if (!firstRun) Select((new Point(ax, ay - height - vertGap).FitToHex(), rootDir, Direction.Down, false));
+                if (quadrant) Select((new Point(ax + width + gap, ay).FitToHex(), setRoot ? Direction.Right : rootDir, Direction.Right));
+                if (!firstRun) Select((new Point(ax, ay - height - vertGap).FitToHex(), rootDir, Direction.Down));
             }
             if (rootDir == Direction.Down || firstRun)
             {
-                if (quadrant) Select((new Point(ax + width, ay - height - vertGap).FitToHex(), setRoot ? Direction.Down : rootDir, Direction.Down, true));
-                if (!firstRun) Select((new Point(ax - gap, ay), rootDir, Direction.Left, false));
+                if (quadrant) Select((new Point(ax + width, ay - height - vertGap).FitToHex(), setRoot ? Direction.Down : rootDir, Direction.Down));
+                if (!firstRun) Select((new Point(ax - gap, ay), rootDir, Direction.Left));
             }
             if (rootDir == Direction.Left || firstRun)
             {
-                if (quadrant) Select((new Point(ax - gap, ay - height).FitToHex(), setRoot ? Direction.Left : rootDir, Direction.Left, true));
-                if (!firstRun) Select((new Point(ax + width, ay + vertGap).FitToHex(), rootDir, Direction.Up, true));
+                if (quadrant) Select((new Point(ax - gap, ay - height).FitToHex(), setRoot ? Direction.Left : rootDir, Direction.Left));
+                if (!firstRun) Select((new Point(ax + width, ay + vertGap).FitToHex(), rootDir, Direction.Up));
             }
             if (rootDir == Direction.Up || firstRun)
             {
-                if (quadrant) Select((new Point(ax, ay + vertGap).FitToHex(), setRoot ? Direction.Up : rootDir, Direction.Up, false));
-                if (!firstRun) Select((new Point(ax + width + gap, ay - height).FitToHex(), rootDir, Direction.Right, true));
+                if (quadrant) Select((new Point(ax, ay + vertGap).FitToHex(), setRoot ? Direction.Up : rootDir, Direction.Up));
+                if (!firstRun) Select((new Point(ax + width + gap, ay - height).FitToHex(), rootDir, Direction.Right));
             }
             if (slots.Count() == 0)
             {
-                _ = LogAsync("NextSlotsHelix", $"No Slots found for n.{territory.Id}! Branch: {rootDir})");
+                _ = LogAsync(level, $"No Slots found for #{territory.Id}! Branch: {rootDir})");
             }
-            HelixLastDir = rootDir;
-            _ = LogAsync("NextSlotsHelix", $"Slots around n.{territory.Id}: {string.Join(", ", log)} (branch: {rootDir}).");
+            helixLastDir = rootDir;
+            _ = LogAsync(level, $"Slots around #{territory.Id}: {string.Join(", ", log)} (branch: {rootDir}).");
             return slots.ToList();
         }
 
@@ -410,17 +435,28 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             {
                 if (!MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
-                    _ = LogAsync("UpdateClusterMap", $"Error placing {c.Name} @ {c.Position.ToTuple()}...");
-                    c.Position = new Point(occupiedMax + 2, errorY).FitToHex();
-                    errorY++;
-                    if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
-                    {
-                        _ = LogAsync("UpdateClusterMap", $"Set aside @ {c.Position.ToTuple()}.");
-                    }
-                    else
-                    {
-                        _ = LogAsync("UpdateClusterMap", $"ALSO FAILED! last attempt was: {c.Position.ToTuple()}.");
-                    }
+                    _ = LogAsync("UpdateClusterMap", $"Error placing {c.Name} @ {c.Position.ToTuple()}, set aside...");
+                    misplaced.Add(c);
+                }
+            }
+        }
+
+        private void HandleMisplaced()
+        {
+            if (misplaced.Count == 0) return;
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{misplaced.Count} clusters were misplaced and will be set aside...", true);
+            int y = 1;
+            foreach (var c in misplaced)
+            {
+                c.Position = occupiedMax.Add(new Point(gap, y * vertGap - vertGap)).FitToHex();
+                y++;
+                if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
+                {
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{c.Name}, territory #{c.AssignedTerritoryId}, placed @ ({c.Position.ToTuple()}).");
+                }
+                else
+                {
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: couldn't place {c.Name}, territory #{c.AssignedTerritoryId}, anywhere! Last attempt: {c.Position.ToTuple()}.");
                 }
             }
         }

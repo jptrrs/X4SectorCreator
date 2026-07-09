@@ -92,7 +92,7 @@ namespace X4SectorCreator.Objects
             var target = new Point(box[2], box[3]);
             Anchor = target.FitToHex();
             var width = box[0] - box[2] + 1;
-            var height = Anchor.Y - box[1] + 2;
+            var height = Anchor.Y - box[1] + 1;
             Size = new Point(width,height);
             //int centerX = width / 2;
             //int centerY = height / 2;
