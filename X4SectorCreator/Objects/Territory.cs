@@ -92,12 +92,18 @@ namespace X4SectorCreator.Objects
             var target = new Point(box[2], box[3]);
             Anchor = target.FitToHex();
             var width = box[0] - box[2] + 1;
-            var height = Anchor.Y - box[1] + 1;
+            var height = Anchor.Y - box[1] + 2;
             Size = new Point(width,height);
             //int centerX = width / 2;
             //int centerY = height / 2;
             //Center = new Point(centerX,centerY);
             SetUpClustersOffsets();
+        }
+
+        internal float SizeToContentRatio()
+        {
+            var area = Size.X * Size.Y;
+            return area / Clusters.Count;
         }
 
         internal void SetUpClustersOffsets()
@@ -106,6 +112,7 @@ namespace X4SectorCreator.Objects
             {
                 cluster.AnchorOffset = cluster.Position.Subtract(Anchor);
             }
+
         }
 
         internal string Reposition(Point displacement)
@@ -120,24 +127,6 @@ namespace X4SectorCreator.Objects
             }
             string report = $"\n{Seed.Name} moved to {Anchor.ToTuple()}: {string.Join(", ", list.ToArray())}";
             return report;
-        }
-
-        internal List<cPoint> Extents
-        {
-            get
-            {
-                List<cPoint> extents = new List<cPoint>();
-                for (int i = 0; i < Size.Y; i++)
-                {
-                    var y = i - Size.Y;
-                    for (int x = 0; x < Size.X; x++)
-                    {
-                        extents.Add(Anchor.Add(new cPoint(x, y)));
-                    }
-                }
-                return extents;
-            }
-        }
-            
+        }            
     }
 }

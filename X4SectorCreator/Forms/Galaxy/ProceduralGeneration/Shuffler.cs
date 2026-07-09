@@ -1,19 +1,25 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics.Metrics;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 {
+    public enum Direction
+    {
+        Undefined = 0,
+        Right = 1,
+        Down = 2,
+        Left = 3,
+        Up = 4,
+    }
+
     internal class Shuffler
     {
+        internal int gap = 2;
+        internal int occupiedMax = 0;
         internal string tempReport;
         internal List<string> tempReportList = new List<string>();
         internal Dictionary<int, Territory> territories = new Dictionary<int, Territory>();
-        internal int occupiedMax = 0;
-        internal int separation = 2;
 
         private static readonly (int dx, int dy)[] NeighborOffsets = new[]
         {
@@ -23,14 +29,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             (1, -1),
             (-1, 1),
             (-1,-1),
-        };
-
-        private readonly Func<Cluster, List<Point>> GetNeighbors = cluster =>
-        {
-            var pos = cluster.Position;
-            return NeighborOffsets
-                .Select(off => new Point(pos.X + off.dx, pos.Y + off.dy))
-                .ToList();
         };
 
         private readonly Func<(Cluster, Cluster), bool> AreConnected = (pair) =>
@@ -47,10 +45,20 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return flag;
         };
 
+        private readonly Func<Cluster, List<Point>> GetNeighbors = cluster =>
+        {
+            var pos = cluster.Position;
+            return NeighborOffsets
+                .Select(off => new Point(pos.X + off.dx, pos.Y + off.dy))
+                .ToList();
+        };
+
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
         {
             return !territory.Clusters.Contains(cluster);
         };
+
+        private Direction HelixLastDir = Direction.Up;
 
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
@@ -67,6 +75,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             //Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
         }
+
+        internal int vertGap => gap * 2;
 
         private Func<Cluster, bool> DLCMatch => cluster =>
         {
@@ -89,11 +99,15 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
         internal void CarveTerritories(IEnumerable<Cluster> clusters)
         {
+            var probe = new Dictionary<Territory, float>();
             ClusterManager.Group(clusters, SortTerritory, x => GetNeighbors(x), x => DLCMatch(x), x => AreConnected(x));
             foreach (var territory in territories.Values)
             {
                 territory.SetUpBox();
+                probe.Add(territory, territory.SizeToContentRatio());
             }
+            var sorted = probe.OrderByDescending(x => x.Value).Select(e => $"\n{e.Key.Id} - {e.Key.Seed.Name} ({e.Key.Size.X}x{e.Key.Size.Y})/{e.Key.Clusters.Count()} = {e.Value}");
+            _ = LogAsync("CarveTerritories", string.Join(", ", sorted));
         }
 
         internal void FindAnnexed()
@@ -175,9 +189,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            OrderedDictionary<Point, GraphDirection> slots = new OrderedDictionary<Point, GraphDirection>() { [new Point(0, 0)] = GraphDirection.Indetermined };
-            //var slot = new Point(0, 0);
-            //var dir = GraphDirection.Indetermined;
+            var slots = new OrderedDictionary<Point, (Direction root, Direction dir, bool flip)>() { [new Point(0, 0)] = (Direction.Undefined, Direction.Undefined, false) };
             SortedSet<cPoint> occupied = new SortedSet<cPoint>();
             for (int i = 0; i < cards.Count(); i++)
             {
@@ -187,68 +199,54 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 var currentPos = territory.Anchor;
                 var slot = slots.First();
                 var newPos = slot.Key;
-                var dir = slot.Value;
-                _ = LogAsync(level, $"Assigning {territory.Id}: {territory.Seed.Name}, size=({territory.Size.ToTuple()}, slot @ {newPos.ToTuple()}{dir}...",true);
+                var locDir = slot.Value.dir;
+                var rootDir = slot.Value.root;
+                var filp = slot.Value.flip;
+                _ = LogAsync(level, $"Assigning n.{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, slot @ {newPos.ToTuple()}{locDir}...", true);
 
-                //Correct insertion point if placing up or left.
-                if (dir == GraphDirection.Left)
-                {
-                    newPos = new Point(newPos.X - territory.Size.X, newPos.Y);
-                    _ = LogAsync(level, $"Picked {newPos.ToTuple()} to fit it to the LEFT...");
-                }
-                else if (dir == GraphDirection.Up)
-                {
-                    newPos = new Point(newPos.X, newPos.Y + territory.Size.Y);
-                    _ = LogAsync(level, $"Picked {newPos.ToTuple()} to fit it UP...");
-                }
+                //Predict new position
+                var plannedMove = newPos.Subtract(currentPos);
 
                 //Adjust to prevet overlaps & fit hex grid
-                //if (i > 0) newPos = AdjustForOverlap(territory, newPos, occupied, dir, ref report).FitToHex();
-                //newPos = newPos.FitToHex();
+                if (i > 0)
+                {
+                    //newPos = AdjustForOverlap(territory, newPos, occupied, locDir, ref report);
+                    newPos = AdjustForInsertionHelix(territory, plannedMove, rootDir, locDir, filp, occupied);
+                }
 
-                //Move the piece and update the board.
-                var displacement = newPos.FitToHex().Subtract(currentPos);
-                var msg = territory.Reposition(displacement);
-                var covered = territory.Extents;
+                //Move the piece
+                var move = newPos.FitToHex().Subtract(currentPos);
+                var report = territory.Reposition(move);
+                _ = LogAsync(level, $"Moved n.{territory.Id} to {newPos.ToTuple()}...");
+
+                //Keep track of occupied areas
+                var covered = FillArea(territory);
                 if (i == 0) occupied.Clear();
                 occupied.UnionWith(covered);
-                _ = LogAsync(level, $"Moved {territory.Id}: {territory.Seed.Name} to {newPos.ToTuple()}. {covered.Count()} tiles were covered, totalling {occupied.Count()} now...");
+                _ = LogAsync(level, $"{covered.Count} tiles were covered, totalling {occupied.Count} now...");
 
+                //Update the board
                 UpdateClusterMap(territory.Clusters, i);
 
                 //Update the slots
                 slots.RemoveAt(0);
-                var nextSlots = PlanNextSpots(territory, occupied, dir);
-
-                //var nextSlot = SpiralSpots(territory, occupied, dir);
-                //slot = nextSlot.Item1;
-                //dir = nextSlot.Item2;
-
-                //Fill in the gaps too
-                var gaps = FillGaps(territory, covered, nextSlots);
-                occupied.UnionWith(gaps);
-                _ = LogAsync(level, $"{gaps.Count()} more tiles were covered to fill in gaps, totalling {occupied.Count()} now.");
-
-                //Removing previous slots if they were were just covered up
-                covered = [.. gaps];
-                if (i > 0) CleanArea(covered, ref slots);
+                var nextSlots = NextSlotsHelix(territory, rootDir, occupied); // Avaliar se 'flip' é util!
 
                 //Finally, add the new slots
-                foreach (var s in nextSlots)
+                foreach (var (pos, root, dir, flip) in nextSlots)
                 {
-                    if (!slots.ContainsKey(s.pos))
+                    if (!slots.ContainsKey(pos))
                     {
-                        slots.Add(s.pos, s.dir);
+                        slots.Add(pos, (root, dir, flip));
                     }
                 }
             }
-            //MessageBox.Show($"Shuffle ajusted {report.Count} territories to avoid overlappig:{string.Join(" ,", report)}");
             occupiedMax = occupied.Max.X;
         }
 
-        private static void CleanArea(List<cPoint> covered, ref OrderedDictionary<Point, GraphDirection> slots)
+        private static void CleanArea(List<cPoint> covered, ref OrderedDictionary<Point, (Direction, Direction, bool)> slots)
         {
-            List<Point> badSlots = [.. slots.Keys.Where(p => covered.Contains(p))];
+            List<Point> badSlots = slots.Keys.Where(p => covered.Contains(p)).ToList();
             if (badSlots.Count > 0)
             {
                 _ = LogAsync("CleanArea", $"{badSlots.Count()} slots were covered and must be removed: {string.Join(", ", badSlots.Select(x => x.ToTuple()))}.");
@@ -259,87 +257,151 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
         }
 
-        private List<cPoint> FillGaps(Territory territory, List<cPoint> covered, List<(Point pos, GraphDirection dir)> nextSlots)
+        private static async Task LogAsync(string level, string message, bool lineSkip = false)
         {
-            var result = new List<cPoint>();
-            var gap = separation - 1;
-            var vectors = nextSlots.Select(x => x.dir).ToList();
-            int trimUp = vectors.Contains(GraphDirection.Up) ? gap : 0;
-            int trimDown = vectors.Contains(GraphDirection.Down) ? gap : 0;
-            int trimRight = vectors.Contains(GraphDirection.Right) ? gap : 0;
-            int trimLeft = vectors.Contains(GraphDirection.Left) ? gap : 0;
-            int limitY = territory.Size.Y + trimUp + trimDown;
-            int limitX = territory.Size.X + trimLeft + trimRight;
-            foreach (var s in nextSlots)
-            {
-                var slot = s.pos;
-                switch (s.dir)
-                {
-                    case GraphDirection.Right:
-                        for (var py = 0; py < limitY; py++)
-                        {
-                            for (var px = 0; px < gap; px++)
-                            {
-                                result.AddUnique(new cPoint(slot.X - px - 1, slot.Y - py - trimUp));
-                            }
-                        }
-                        break;
-                    case GraphDirection.Down:
-                        for (var px = 0; px < limitX; px++)
-                        {
-                            for (var py = 0; py < gap; py++)
-                            {
-                                result.AddUnique(new cPoint(slot.X + px - trimLeft, slot.Y + py + 1));
-                            }
-                        }
-                        break;
-                    case GraphDirection.Left:
-                        for (var py = 0; py < limitY; py++)
-                        {
-                            for (var px = 0; px < gap; px++)
-                            {
-                                result.AddUnique(new cPoint(slot.X + px + 1, slot.Y - py - trimUp));
-                            }
-                        }
-                        break;
-                    case GraphDirection.Up:
-                        for (var px = 0; px < territory.Size.X; px++)
-                        {
-                            for (var py = 0; py < gap; py++)
-                            {
-                                result.AddUnique(new cPoint(slot.X + px - trimLeft, slot.Y - py - 1));
-                            }
-                        }
-                        break;
-                    case GraphDirection.Indetermined:
-                        break;
-                }
-            }
-            return result;
+            string jump = lineSkip ? "\n" : "";
+            string logEntry = $"{jump}[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [{level}] {message}{Environment.NewLine}";
+            await File.AppendAllTextAsync("test.log", logEntry);
         }
 
-        private Point AdjustForOverlap(Territory territory, Point position, SortedSet<cPoint> occupied, GraphDirection direction, ref List<string> report)
+        private Point AdjustForInsertionHelix(Territory territory, Point displacement, Direction root, Direction dir, bool flip, SortedSet<cPoint> occupied)
         {
-            var hits = new List<Point>();
-            var floor = position.Y - territory.Size.Y;
-            for (int lin = 0; lin < territory.Size.Y; lin++)
+            var position = territory.Anchor.Add(displacement);
+            var width = territory.Size.X;
+            var oddHeight = territory.Size.Y;
+            var height = oddHeight + oddHeight % 2;
+            var flipX = width - 1;
+            var flipY = height - 2;
+
+            Point offset = new Point();
+            var hits = Enumerable.Empty<Point>();
+            int push = 0;
+            switch (root)
             {
-                for (int col = 0; col < territory.Size.X; col++)
+                case Direction.Undefined:
+                case Direction.Right:
+                    offset = position; // Anchor = slot
+                    hits = Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)); // Scan right/down
+                    break;
+
+                case Direction.Down:
+                    offset = new Point(position.X - flipX, position.Y); // Anchor to the right
+                    hits = Spread(width, height, coord => new Point(position.X - coord.a, position.Y - coord.b), p => occupied.Contains(p)); // Scan left/down
+                    break;
+
+                case Direction.Left:
+                    offset = new Point(position.X - flipX, position.Y + flipY); // Anchor opposite to slot.
+                    hits = Spread(width, height, coord => new Point(position.X - coord.a, position.Y + coord.b), p => occupied.Contains(p)); // Scan left/up
+                    break;
+
+                case Direction.Up:
+                    offset = new Point(position.X, position.Y + flipY); // Anchor at the bottom
+                    hits = Spread(width, height, coord => new Point(position.X + coord.a, position.Y + coord.b), p => occupied.Contains(p)); // Scan right/up
+                    break;
+            }
+            if (hits.Any())
+            {
+                // Move into the appropriate direction
+                switch (dir)
                 {
-                    var test = new Point(position.X + col, position.Y - lin);
-                    if (occupied.Contains(test))
-                    {
-                        hits.Add(new Point(col, lin));
+                    case Direction.Undefined:
+                    case Direction.Right:
+                        push = hits.MaxBy(p => p.X).X;
+                        offset = new Point(offset.X + push, offset.Y);
                         break;
-                    }
+
+                    case Direction.Down:
+                        push = hits.MaxBy(p => p.Y).Y;
+                        offset = new Point(position.X, position.Y - push);
+                        break;
+
+                    case Direction.Left:
+                        push = hits.MaxBy(p => p.X).X;
+                        offset = new Point(offset.X - push, offset.Y);
+                        break;
+
+                    case Direction.Up:
+                        push = hits.MaxBy(p => p.Y).Y;
+                        offset = new Point(offset.X, offset.Y + push);
+                        break;
                 }
             }
-            if (hits.Count() == 0) return position;
-            int moveLeft = hits.Select(p => p.X).Max() - territory.Size.X;
-            int moveUp = hits.Select(p => p.Y).Max() - territory.Size.Y;
-            var target = new Point(position.X + moveLeft, position.Y + moveUp);
-            report.Add($"{territory.Id}: {territory.Seed.Name}, placed {direction}, moved by {moveLeft},{moveUp}");
-            return target;
+            offset = offset.FitToHex();
+            _ = LogAsync("AdjustForInsertionHelix", $"Target for n.{territory.Id} calculated @ {offset.ToTuple()}, pushed {push} tiles {dir} from its slot.");
+            return offset;
+        }
+
+        private List<cPoint> FillArea(Territory territory)
+        {
+            var width = territory.Size.X + gap;
+            var height = territory.Size.Y + vertGap;
+            return Spread(width, height, coord => new Point(territory.Anchor.X - (gap / 2) + coord.a, territory.Anchor.Y + (vertGap / 2) - coord.b)).Select(x => (cPoint)x).ToList();
+        }
+
+        private List<(Point pos, Direction rootDir, Direction dir, bool flip)> NextSlotsHelix(Territory territory, Direction rootDir, SortedSet<cPoint> occupied)
+        {
+            var ax = territory.Anchor.X;
+            var ay = territory.Anchor.Y;
+            var width = territory.Size.X - 1;
+            var oddHeight = territory.Size.Y;
+            var height = oddHeight + oddHeight % 2 - 2;
+            bool setRoot = rootDir == Direction.Undefined ? true : false;
+            bool firstRun = rootDir == Direction.Undefined;
+            bool quadrant = rootDir != HelixLastDir;
+
+            var slots = new List<(Point pos, Direction root, Direction dir, bool flip)>();
+            //logging
+            List<string> log = new List<string>();
+            void Select((Point slot, Direction root, Direction dir, bool flip) set)
+            {
+                if (!occupied.Contains(set.slot))
+                {
+                    slots.Add(set);
+                    log.Add($"{set.slot.ToTuple().ToString()}{set.dir}");
+                }
+            }
+
+            //Place future slots, in clockwise order
+            if (rootDir == Direction.Right || firstRun)
+            {
+                if (quadrant) Select((new Point(ax + width + gap, ay).FitToHex(), setRoot ? Direction.Right : rootDir, Direction.Right, false));
+                if (!firstRun) Select((new Point(ax, ay - height - vertGap).FitToHex(), rootDir, Direction.Down, false));
+            }
+            if (rootDir == Direction.Down || firstRun)
+            {
+                if (quadrant) Select((new Point(ax + width, ay - height - vertGap).FitToHex(), setRoot ? Direction.Down : rootDir, Direction.Down, true));
+                if (!firstRun) Select((new Point(ax - gap, ay), rootDir, Direction.Left, false));
+            }
+            if (rootDir == Direction.Left || firstRun)
+            {
+                if (quadrant) Select((new Point(ax - gap, ay - height).FitToHex(), setRoot ? Direction.Left : rootDir, Direction.Left, true));
+                if (!firstRun) Select((new Point(ax + width, ay + vertGap).FitToHex(), rootDir, Direction.Up, true));
+            }
+            if (rootDir == Direction.Up || firstRun)
+            {
+                if (quadrant) Select((new Point(ax, ay + vertGap).FitToHex(), setRoot ? Direction.Up : rootDir, Direction.Up, false));
+                if (!firstRun) Select((new Point(ax + width + gap, ay - height).FitToHex(), rootDir, Direction.Right, true));
+            }
+            if (slots.Count() == 0)
+            {
+                _ = LogAsync("NextSlotsHelix", $"No Slots found for n.{territory.Id}! Branch: {rootDir})");
+            }
+            HelixLastDir = rootDir;
+            _ = LogAsync("NextSlotsHelix", $"Slots around n.{territory.Id}: {string.Join(", ", log)} (branch: {rootDir}).");
+            return slots.ToList();
+        }
+
+        private IEnumerable<Point> Spread(int limitA, int limitB, Func<(int a, int b), Point> form, Predicate<Point> filter = null, bool filtered = false)
+        {
+            for (var a = 0; a < limitA; a++)
+            {
+                for (var b = 0; b < limitB; b++)
+                {
+                    var p = form((a, b));
+                    if (filter == null) yield return p;
+                    else if (filter(p)) yield return filtered ? p : new Point(a, b);
+                }
+            }
         }
 
         private void UpdateClusterMap(List<Cluster> clusters, int errorY = 0)
@@ -348,8 +410,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             {
                 if (!MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
-                    _ = LogAsync("UpdateClusterMap", $"Error placing {c.Name}: @ {c.Position.ToTuple()}...");
-                    c.Position = new Point(occupiedMax +2, errorY);
+                    _ = LogAsync("UpdateClusterMap", $"Error placing {c.Name} @ {c.Position.ToTuple()}...");
+                    c.Position = new Point(occupiedMax + 2, errorY).FitToHex();
                     errorY++;
                     if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                     {
@@ -362,108 +424,5 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
             }
         }
-
-        private (Point, GraphDirection) SpiralSpots(Territory territory, SortedSet<cPoint> occupied, GraphDirection lastDir)
-        {
-            bool hold = false;
-            bool escape = false;
-            //Next slot is place in clockwise order, unless not possible, resulting in a spiral pattern.
-            start:
-            if (hold || lastDir == GraphDirection.Right)
-            {
-                var nextDown = new Point(territory.Anchor.X, territory.Anchor.Y - territory.Size.Y - separation).FitToHex(GraphDirection.Down);
-                if (!occupied.Contains(nextDown)) return (nextDown, GraphDirection.Down);
-                else hold= true;
-            }
-            if (escape) return (new Point(0, 0), GraphDirection.Indetermined);
-            if (hold || lastDir == GraphDirection.Up || lastDir == GraphDirection.Indetermined)
-            {
-                var nextRight = new Point(territory.Anchor.X + territory.Size.X + separation, territory.Anchor.Y).FitToHex(GraphDirection.Right);
-                if (!occupied.Contains(nextRight)) return (nextRight, GraphDirection.Right);
-                else hold = true;
-            }
-            if (hold || lastDir == GraphDirection.Left)
-            {
-                var nextUp = new Point(territory.Anchor.X, territory.Anchor.Y + separation).FitToHex(GraphDirection.Up);
-                if (!occupied.Contains(nextUp)) return (nextUp, GraphDirection.Up);
-                else hold = true;
-            }
-            if (hold || lastDir == GraphDirection.Down)
-            {
-                var nextLeft = new Point(territory.Anchor.X - separation, territory.Anchor.Y).FitToHex(GraphDirection.Left);
-                if (!occupied.Contains(nextLeft)) return (nextLeft, GraphDirection.Left);
-                else hold = true;
-            }
-            escape = true;
-            goto start;
-        }
-
-        private List<(Point pos, GraphDirection dir)> PlanNextSpots(Territory territory, SortedSet<cPoint> occupied, GraphDirection lastDir)
-        {
-            ////Correct for odd size numbers so we don't get invalid hexagon displacements.
-            //int snapHeight = (int)Math.Ceiling(territory.Size.Y / 2.0) * 2;
-            //int snapWidth = (int)Math.Ceiling(territory.Size.X / 2.0) * 2;
-
-            //Possible positions around for the next territory to be placed.
-            var nextRight = new Point(territory.Anchor.X + territory.Size.X + separation, territory.Anchor.Y).FitToHex(GraphDirection.Right);
-            var nextDown = new Point(territory.Anchor.X, territory.Anchor.Y - territory.Size.Y - separation).FitToHex(GraphDirection.Down);
-            var nextLeft = new Point(territory.Anchor.X - separation, territory.Anchor.Y).FitToHex(GraphDirection.Left);
-            var nextUp = new Point(territory.Anchor.X, territory.Anchor.Y + separation).FitToHex(GraphDirection.Up);
-
-            //logging
-            List<string> log = new List<string>();
-            void Log(Point slot, GraphDirection dir)
-            {
-                log.Add($"{slot.ToTuple().ToString()}{dir}");
-            }
-
-            var result = new List<(Point, GraphDirection)>();
-
-            //Place future slots, in clockwise order
-            if (lastDir != GraphDirection.Left && (occupied.MaxBy(p => p.X).X < nextRight.X || !occupied.Contains(nextRight)))
-            {
-                result.Add((nextRight, GraphDirection.Right));
-                //slots.TryAdd(nextRight, GraphDirection.Right);
-                Log(nextRight, GraphDirection.Right);
-            }
-            if (lastDir != GraphDirection.Up && (occupied.MinBy(p => p.Y).Y > nextDown.Y || !occupied.Contains(nextDown)))
-            {
-                result.Add((nextDown, GraphDirection.Down));
-                Log(nextDown, GraphDirection.Down);
-            }
-            if (lastDir != GraphDirection.Right && (occupied.MinBy(p => p.X).X > nextLeft.X || !occupied.Contains(nextLeft)))
-            {
-                result.Add((nextLeft, GraphDirection.Left));
-                Log(nextLeft, GraphDirection.Left);
-            }
-            if (lastDir != GraphDirection.Down && (occupied.MaxBy(p => p.Y).Y < nextUp.Y || !occupied.Contains(nextUp)))
-            {
-                result.Add((nextUp, GraphDirection.Up));
-                Log(nextUp, GraphDirection.Up);
-            }
-
-            if (result.Count() == 0)
-            {
-                _ = LogAsync("PlanNextSpots", $"No Slots found for {territory.Id}: {territory.Seed.Name}! Attempted:\nR.{nextRight.ToTuple()}, D.{nextDown.ToTuple()}, L.{nextLeft.ToTuple()}, U.{nextUp.ToTuple()}.");
-            }
-            _ = LogAsync("PlanNextSpots", $"Slots around {territory.Id}: {territory.Seed.Name}: {string.Join(", ", log)}.");
-            return result;
-        }
-
-        static async Task LogAsync(string level, string message, bool lineSkip = false)
-        {
-            string jump = lineSkip ? "\n" : "";
-            string logEntry = $"{jump}[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [{level}] {message}{Environment.NewLine}";
-            await File.AppendAllTextAsync("test.log", logEntry);
-        }
-    }
-
-    public enum GraphDirection
-    {
-        Right = 0,
-        Down = 1,
-        Left = 2,
-        Up = 3,
-        Indetermined = 4
     }
 }

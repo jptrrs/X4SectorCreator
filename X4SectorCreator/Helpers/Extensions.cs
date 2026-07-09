@@ -348,7 +348,7 @@ namespace X4SectorCreator.Helpers
         }
 
         // Snapping functionality so we don't have to worry about the weird coord system.
-        public static Point FitToHex(this Point target, GraphDirection bias = GraphDirection.Right)
+        public static Point FitToHex(this Point target, Direction bias = Direction.Right)
         {
             if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
             {
