@@ -348,8 +348,18 @@ namespace X4SectorCreator.Helpers
         }
 
         // Snapping functionality so we don't have to worry about the weird coord system.
-        public static Point FitToHex(this Point target, Direction bias = Direction.Up)
+        public static Point FitToHex(this Point target)
         {
+            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
+            {
+                target.Y += 1;
+            }
+            return target;
+        }
+
+        public static Point FitToHex(this Point target, Direction bias = Direction.Up, bool supressLog = false)
+        {
+            var original = target;
             if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
             {
                 switch (bias)
@@ -369,6 +379,7 @@ namespace X4SectorCreator.Helpers
                         break;
                 }
             }
+            if (!supressLog && (original != target)) File.AppendAllTextAsync("test.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [FitToHex] Moved {original.ToTuple()} {bias} to {target.ToTuple()}{Environment.NewLine}");
             return target;
         }
 
