@@ -18,9 +18,11 @@ namespace X4SectorCreator.Objects
         internal List<int> connectedIds = new List<int>();
         internal List<int> annexedIds = new List<int>();
         internal List<int> closeColonyIds = new List<int>();
+        internal List<cPoint> contour = new List<cPoint>();
         internal int[] box = new int[4];
         internal Point Size = new Point();
         internal Point Anchor = new Point();
+        internal Point Corner = new Point();
 
         /// <summary>
         /// A list of connections to/from a territory.
@@ -89,15 +91,44 @@ namespace X4SectorCreator.Objects
             box[1] = posY.Min();
             box[2] = posX.Min();
             box[3] = posY.Max();
-            var target = new Point(box[2], box[3]);
-            Anchor = target.FitToHex();
             var width = box[0] - box[2] + 1;
-            var height = Anchor.Y - box[1] + 2;
+            var height = box[3] - box[1] + 2;
+            Corner = new Point(box[2], box[3]);
+            Anchor = Corner.FitToHex();
             Size = new Point(width,height);
             //int centerX = width / 2;
             //int centerY = height / 2;
             //Center = new Point(centerX,centerY);
             SetUpClustersOffsets();
+        }
+
+        private bool overhead => Anchor.Y > box[3];
+        private int heightToFit = 0;
+        internal int HeightToFit
+        {
+            get
+            { 
+                if (heightToFit == 0)
+                {
+                    heightToFit = overhead ? Size.Y + 1 : Size.Y; 
+                }
+                return heightToFit;
+            }
+        }
+
+        internal List<cPoint> Contour
+        {
+            get
+            {
+                if (!contour.Any())
+                {
+                    foreach (var cluster in Clusters)
+                    {
+                        contour.AddRangeUnique(cluster.Contour);
+                    }
+                }
+                return contour;
+            }
         }
 
         internal float SizeToContentRatio()

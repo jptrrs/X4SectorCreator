@@ -158,6 +158,27 @@ namespace X4SectorCreator.Objects
             }
             return result;
         }
+
+        internal List<cPoint> Contour
+        {
+            get
+            {
+                var left = Position.X - 1;
+                var right = Position.X + 1;
+                var upSide = Position.Y + 1;
+                var downSide = Position.Y - 1;
+                return 
+                [
+                Position,
+                new Point(Position.X, Position.Y + 2),
+                new Point(Position.X, Position.Y - 2),
+                new Point(left, upSide),
+                new Point(left, downSide),
+                new Point(right, upSide),
+                new Point(right, downSide),
+                ];
+            }
+        }
     }
 
     public enum ClusterOption

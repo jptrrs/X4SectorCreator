@@ -119,6 +119,5 @@ namespace X4SectorCreator.Helpers
             }
             return (cols, rows);
         }
-
     }
 }

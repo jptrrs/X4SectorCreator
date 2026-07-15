@@ -1,10 +1,7 @@
-﻿using System.Numerics;
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
-using static X4SectorCreator.Objects.Constructionplan;
 
 namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 {
@@ -19,7 +16,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
     internal class Shuffler
     {
-        internal const int gap = 2;
+        internal const int gap = 1;
         internal List<Cluster> misplaced = [];
         internal Point occupiedMax;
         internal Dictionary<int, Territory> territories = [];
@@ -34,6 +31,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         ];
 
         private static (int cols, int rows) hexGridFrame;
+
+        private static int squareBoundary = -1;
 
         private readonly Func<(Cluster, Cluster), bool> AreConnected = (pair) =>
         {
@@ -62,9 +61,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return !territory.Clusters.Contains(cluster);
         };
 
-        private Direction helixLastDir = Direction.Up;
         private float helixGeneration = 0;
-
+        private Direction helixLastDir = Direction.Up;
         private Func<Point, bool> InBounds = p =>
         {
             var absX = Math.Abs(p.X);
@@ -72,87 +70,95 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return absX <= GridFrameBounds.maxX && absY <= GridFrameBounds.maxY;
         };
 
-        private Point Drift(Point position, out Direction dir, out Point vector)
+        private Func<Point, bool> InsideSquare = p =>
+        {
+            var absX = Math.Abs(p.X);
+            var absY = Math.Abs(p.Y);
+            return absX < SquareBoundary && absY < SquareBoundary;
+        };
+
+        private bool Drift(Point start, out Point end)
         {
             //Push the position (pseudo)clockwise based on the distance to the center.
 
             //Escape if edge case
-            if (position.IsEmpty || position.X == position.Y)
+            if (start.IsEmpty || start.X == start.Y)
             {
-                dir = Direction.Undefined;
-                vector = new Point();
-                return position;
+                end = start;
+                return false;
             }
 
             //Bases
-            float limit = GridFrameBounds.maxY; //not bothering with X because the maps fits a horizontal rectangle.
-            var maxDrift = 2;
-       
+            float limit = GridFrameBounds.maxY * 1.5f; //not bothering with X because the maps fits a horizontal rectangle.
+            var maxDrift = 3;
+
+            //Distance on the Y axis determines drift in the X axis, and vice-versa
             //Smoothstep easing for values near zero to remain zero while larger values reach maxDrift
-            float normY = Math.Clamp(Math.Abs(position.Y) / limit, 0f, 1f);
+            float normY = Math.Clamp(Math.Abs(start.Y) / limit, 0f, 1f);
             float easedY = normY * normY * (3f - 2f * normY); // smoothstep
             float scaledY = easedY * maxDrift;
-            int moveX = scaledY < 0.5f ? 0 : (int)MathF.Round(scaledY);
+            int moveX = scaledY < 0.3f ? 0 : (int)MathF.Round(scaledY);
             moveX = Math.Min(maxDrift, moveX);
 
-            float normX = Math.Clamp(Math.Abs(position.X) / limit, 0f, 1f);
+            float normX = Math.Clamp(Math.Abs(start.X) / limit, 0f, 1f);
             float easedX = normX * normX * (3f - 2f * normX);
             float scaledX = easedX * maxDrift;
-            int moveY = scaledX < 0.5f ? 0 : (int)MathF.Round(scaledX);
+            int moveY = scaledX < 0.3f ? 0 : (int)MathF.Round(scaledX);
             moveY = Math.Min(maxDrift, moveY);
 
-            dir = GetDriftDirection(position);
-            vector = GetDriftVector(position, dir, moveX, moveY);
-            var newPos = position.Add(vector);
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{position.ToTuple()} drifted to {newPos.ToTuple()}, limit={limit} normalX={normX} normalY={normY} numX={moveX}, numY={moveY}");
-            return newPos;
+            var vector = GetDriftVector(start, GetDriftDirection(start), moveX, moveY);
+            end = start.Add(vector);
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"vector {vector.ToTuple()} calculated from moveX={moveX} and moveY{moveY}.");
+
+            return !vector.IsEmpty;
         }
 
-        private Direction GetDriftDirection(Point position)
+        private Direction GetDriftDirection(Point pos)
         {
             //Direction is based on position, 45 degrees quadrants.
-            if (position.Y > position.X && position.Y > -position.X) //Above: move right then down
+            if ((InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X) || (pos.X < SquareBoundary && pos.Y > SquareBoundary)) //Above: move right then down
             {
                 return Direction.Right;
             }
-            else if (position.Y < position.X && position.Y < -position.X) //Below: move left then up
+            else if ((InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X) || (pos.X > -SquareBoundary && pos.Y < -SquareBoundary)) //Below: move left then up
             {
                 return Direction.Left;
             }
-            else if (position.X > position.Y && position.X > -position.Y) //Right: move down then left
+            else if ((InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y) || (pos.X > SquareBoundary && pos.Y > -SquareBoundary)) //Right: move down then left
             {
                 return Direction.Down;
             }
-            else if (position.X < position.Y && position.X < -position.Y) //Left: move up then right
+            else if ((InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y) || (pos.X < -SquareBoundary && pos.Y < SquareBoundary)) //Left: move up then right
             {
                 return Direction.Up;
             }
             return Direction.Undefined;
         }
 
-        private Point GetDriftVector(Point position, Direction dir, int moveX, int offsetY)
+        private Point GetDriftVector(Point position, Direction dir, int moveX, int moveY)
         {
             int yaw = 0;
             switch (dir)
             {
                 case Direction.Right: //Above: move right then down
-                    if (position.X > 0) yaw = offsetY;
-                    return new Point(moveX, - yaw).FitToHex(Direction.Down);
+                    if (position.X > 0) yaw = moveY;
+                    return new Point(moveX, -yaw)/*.FitToHex(Direction.Down)*/;
                 case Direction.Left: //Below: move left then up
-                    if (position.X < 0) yaw = offsetY;
-                    return new Point(- moveX, yaw).FitToHex();
+                    if (position.X < 0) yaw = moveY;
+                    return new Point(-moveX, yaw)/*.FitToHex()*/;
                 case Direction.Down: //Right: move down then left
                     if (position.Y < 0) yaw = moveX;
-                    return new Point(- yaw, - offsetY).FitToHex(Direction.Down);
+                    return new Point(-yaw, -moveY)/*.FitToHex(Direction.Down)*/;
                 case Direction.Up: //Left: move up then right
                     if (position.Y > 0) yaw = moveX;
-                    return new Point(yaw, offsetY).FitToHex();
+                    return new Point(yaw, moveY)/*.FitToHex()*/;
                 case Direction.Undefined:
                     goto Fail;
             }
             Fail:
             return new Point(0, 0);
         }
+
 
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
@@ -173,8 +179,22 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
         }
+
         internal int vertGap => gap * 2;
+
         private static (int maxX, int maxY) GridFrameBounds => (hexGridFrame.cols / 2, hexGridFrame.rows / 2);
+
+        private static int SquareBoundary
+        { 
+            get
+            {
+                if (squareBoundary < 0)
+                {
+                    squareBoundary = Math.Min(GridFrameBounds.maxX, GridFrameBounds.maxY);
+                }
+                return squareBoundary;
+            }
+        }
 
         private Func<Cluster, bool> DLCMatch => cluster =>
         {
@@ -205,7 +225,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 log.Add($"\n{territory.Id} - {territory.Seed.Name}, {territory.Size.X}x{territory.Size.Y} with {territory.Clusters.Count} clusters");
             }
             //logging
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("",log)}");
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
         }
 
         internal void FindAnnexed()
@@ -278,7 +298,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         internal void Shuffle()
         {
             //logging
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Shuffling ---",true);
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Shuffling ---", true);
 
             //No turning back now!
             MainForm.Instance.AllClusters.Clear();
@@ -307,24 +327,26 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                         break;
                     }
                 }
-                var slot =  slots.First();
+                var slot = slots.First();
                 var pos = slot.Key;
                 var newPos = pos;
                 var locDir = slot.Value.dir;
                 var rootDir = slot.Value.root;
+
                 _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, slot @ {newPos.ToTuple()}{locDir}...", true);
 
                 //Fine-tune the insertion spot so it fits right in.
-                var plannedMove = newPos.Subtract(currentPos);
-                if (i > 0) newPos = AdjustForInsertion(territory, plannedMove, rootDir, locDir, occupied);
+                var planned = newPos.Subtract(currentPos);
+                if (i > 0) newPos = AdjustForInsertion(territory, planned, rootDir, locDir, occupied); //fitted
 
                 //Move the piece
-                var move = newPos.FitToHex().Subtract(currentPos);
+                var move = newPos/*.FitToHex()*/.Subtract(currentPos); //defitted
                 var report = territory.Reposition(move);
                 _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Moved #{territory.Id} to {newPos.ToTuple()}...");
 
                 //Keep track of occupied areas
-                var covered = FillArea(territory);
+                //var covered = FillArea(territory); //fitted
+                var covered = territory.Contour;
                 if (i == 0) occupied.Clear();
                 occupied.UnionWith(covered);
                 occupiedMax = occupied.Max;
@@ -332,18 +354,35 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
                 //Update the board.
                 UpdateClusterMap(territory.Clusters, i);
-                
+
                 //Prepare the next slots.
                 slots.RemoveAt(0);
-                if (i > 0) CleanArea(covered, ref slots);
-                var nextSlots = NextSlotsHelix(pos, territory, rootDir, occupied);
+                //if (i > 0) CleanArea(covered, ref slots);
+                var nextSlots = NextSlotsHelix(newPos, territory, rootDir, occupied); //defitted
                 foreach (var (p, root, dir) in nextSlots)
                 {
                     if (InBounds(p)) slots.TryAdd(p, (root, dir));
-                    else deferred.TryAdd(pos, (root, dir));
+                    else deferred.TryAdd(p, (root, dir));
                 }
             }
-            HandleMisplaced();
+            HandleMisplaced(); //fitted
+        }
+
+        private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
+        {
+            switch (direction)
+            {
+                case Direction.Undefined:
+                case Direction.Right:
+                    return position; // Anchor = slot
+                case Direction.Down:
+                    return new Point(position.X - flipX, position.Y); // Anchor to the right
+                case Direction.Left:
+                    return new Point(position.X - flipX, position.Y + flipY); // Anchor opposite to slot.
+                case Direction.Up:
+                    return new Point(position.X, position.Y + flipY); // Anchor at the bottom
+            }
+            return position;
         }
 
         private static void CleanArea(List<cPoint> covered, ref OrderedDictionary<Point, (Direction root, Direction dir)> slots)
@@ -368,34 +407,51 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
         private Point AdjustForInsertion(Territory territory, Point displacement, Direction root, Direction dir, SortedSet<cPoint> occupied)
         {
-            var position = territory.Anchor.Add(displacement);
+            var Slot = territory.Anchor.Add(displacement);
             var width = territory.Size.X;
-            var oddHeight = territory.Size.Y;
+            //var oddHeight = territory.Size.Y;
+            var oddHeight = territory.HeightToFit;
             var height = oddHeight + oddHeight % 2;
             var flipX = width - 1;
             var flipY = height - 2;
-            bool bang = false;
-            bool drift = false;
-            Direction driftTo = Direction.Undefined;
-            Point vector = new Point();
+            //flush out the slot if covered.
+            var movedSlot = Slot;
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Preparing to adjust for {Slot.ToTuple()}.");
 
-            var offset = AnchorRelativeToDirection(root, position, flipX, flipY);
-            if (Collision(occupied, offset, width, height, ref vector))
+            var driftDir = GetDriftDirection(Slot);
+            var n = 1;
+            while (occupied.Contains(movedSlot))
             {
-                bang = true;
-                if (vector.IsEmpty)
+                movedSlot = MoveIntoDirection(driftDir, movedSlot, n);
+                n++;
+            }
+            var offset = new Point();
+            if (n > 1)
+            {
+                offset = AnchorRelativeToDirection(root, movedSlot, flipX, flipY);
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{Slot.ToTuple()} pushed to {movedSlot.ToTuple()} because it had been covered.");
+            }
+            else
+            {
+                offset = AnchorRelativeToDirection(root, Slot, flipX, flipY);
+                offset = TryDrift(offset, occupied, width, height); //Mandatory 1st drift. deFitted
+            }
+            bool bang = Collision(occupied, offset, width, height, out var dodge);
+            string reportCollision = "";
+            if (bang)
+            {
+                if (dodge.IsEmpty)
                 {
                     //This means this slot was boxed in! Last attempt to place it
                     _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.Id}: there wasn't enough space for it! Attempting a forced push {dir}...");
                     bool placed = false;
                     for (int i = 1; i < 10; i++)
                     {
-                        var _vector = new Point();
                         offset = MoveIntoDirection(dir, offset, i * 2);
-                        if (!Collision(occupied, offset, width, height, ref _vector))
+                        if (!Collision(occupied, offset, width, height, out _))
                         {
                             placed = true;
-                            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it {i*2} tiles {dir}. Proceeding to add drift.");
+                            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it {i * 2} tiles {dir}. Proceeding to add drift.");
                             break;
                         }
                     }
@@ -408,29 +464,14 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 else
                 {
                     // first, move to avoid overlaps.
-                    offset = offset.Add(vector);
+                    offset = offset.Add(dodge);
                 }
                 // check if we could also apply drift
-                Point driftMove;
-                var drifted = Drift(offset, out driftTo, out driftMove);
-                if (!driftMove.IsEmpty)
-                {
-                    drift = true;
-                    Point SecondVector = new Point();
-                    if (Collision(occupied, drifted, width, height, ref SecondVector))
-                    {
-                        offset = offset.Add(SecondVector);
-                    }
-                }
+                offset = TryDrift(offset, occupied, width, height); //defitted
+                reportCollision = $"Some overlaps were corrected.";
             }
-            offset = offset.FitToHex();
-            if (bang)
-            {
-                string reportDrift = drift ? $", making it drift further {driftTo}" : "";
-                string reportCollision = bang ? $"Overlaps were corrected{reportDrift}." : "";
-                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"#{territory.Id} was pushed to {offset.ToTuple()}. {reportCollision}");
-            }
-            return offset;
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"#{territory.Id} was pushed to {offset.ToTuple()}. {reportCollision}");
+            return offset.FitToHex(); //Fitted
         }
 
         private static Point MoveIntoDirection(Direction direction, Point position, int distance)
@@ -454,42 +495,23 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return position;
         }
 
-        private Point DirectionalCollision(Direction direction, SortedSet<cPoint> occupied, Point position, int width, int height)
-        {
-            var hits = Enumerable.Empty<Point>();
-            switch (direction)
-            {
-                case Direction.Undefined:
-                case Direction.Right:
-                    hits = Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)); // Scan right/down
-                    break;
-                case Direction.Down:
-                    hits = Spread(width, height, coord => new Point(position.X - coord.a, position.Y - coord.b), p => occupied.Contains(p)); // Scan left/down
-                    break;
-                case Direction.Left:
-                    hits = Spread(width, height, coord => new Point(position.X - coord.a, position.Y + coord.b), p => occupied.Contains(p)); // Scan left/up
-                    break;
-                case Direction.Up:
-                    hits = Spread(width, height, coord => new Point(position.X + coord.a, position.Y + coord.b), p => occupied.Contains(p)); // Scan right/up
-                    break;
-            }
-            var result = new Point();
-            if (hits.Any())
-            {
-                result = new Point(hits.MaxBy(p => p.X).X, hits.MaxBy(p => p.Y).Y);
-            }
-            return result;
-        }
-
-        private bool Collision(SortedSet<cPoint> occupied, Point position, int width, int height, ref Point pushVector)
+        private bool Collision(SortedSet<cPoint> occupied, Point position, int width, int height, out Point pushVector)
         {
             var hits = Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)).ToList();
-            if (!hits.Any()) return false;
+            if (!hits.Any())
+            {
+                pushVector = new Point();
+                return false;
+            }
             var minX = hits.MinBy(p => p.X).X;
-            var maxX = hits.MaxBy(p => p.X).X +1; //for comparsions against width
+            var maxX = hits.MaxBy(p => p.X).X + 1; //for comparsions against width
             var minY = hits.MinBy(p => p.Y).Y;
-            var maxY = hits.MaxBy(p => p.Y).Y +1; //for comparsions against height
-            if ((minX == 0 && maxX == width - 1) || (minY == 0 && maxY == height)) return true; // hits on both sides or above and below
+            var maxY = hits.MaxBy(p => p.Y).Y + 1; //for comparsions against height
+            if ((minX == 0 && maxX == width - 1) || (minY == 0 && maxY == height)) // hits on both sides or above and below
+            {
+                pushVector = new Point();
+                return true;
+            }
             bool leftHit = maxX < width;
             bool topHit = maxY < height;
             int pushX = leftHit ? maxX : -(width - minX); // if left, push right & vice-versa
@@ -498,30 +520,19 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return true;
         }
 
-        private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
-        {
-            switch (direction)
-            {
-                case Direction.Undefined:
-                case Direction.Right:
-                    return position; // Anchor = slot
-                case Direction.Down:
-                    return new Point(position.X - flipX, position.Y); // Anchor to the right
-                case Direction.Left:
-                    return new Point(position.X - flipX, position.Y + flipY); // Anchor opposite to slot.
-                case Direction.Up:
-                    return new Point(position.X, position.Y + flipY); // Anchor at the bottom
-            }
-            return position;
-        }
 
         private List<cPoint> FillArea(Territory territory)
         {
             var width = territory.Size.X + gap;
-            var height = territory.Size.Y + gap;
+            var height = territory.HeightToFit + gap;
             return Spread(width, height,
-                coord => new Point(territory.Anchor.X - (gap / 2) + coord.a, territory.Anchor.Y + (gap / 2) - coord.b).FitToHex())
+                coord => new Point(territory.Anchor.X - (gap / 2) + coord.a, territory.Anchor.Y + (vertGap / 2) - coord.b).FitToHex())
                 .Select(x => (cPoint)x).ToList();
+            //var height = territory.Size.Y + gap;
+            //return Spread(width, height,
+            //    coord => new Point(territory.Corner.X - (gap / 2) + coord.a, territory.Corner.Y + (vertGap / 2) - coord.b).FitToHex())
+            //    .Select(x => (cPoint)x).ToList();
+
         }
 
         private void HandleMisplaced()
@@ -550,36 +561,36 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             bool firstRun = rootDir == Direction.Undefined;
             bool quadrant = rootDir != helixLastDir;
             bool cycle = quadrant && rootDir == Direction.Right;
-            var ax = firstRun ? territory.Anchor.X : lastSlot.X;
-            var ay = firstRun ? territory.Anchor.Y : lastSlot.Y;
-            var width = territory.Size.X - 1;
-            var oddHeight = territory.Size.Y;
-            var height = oddHeight + oddHeight % 2 - 2; //0
+            //var ax = firstRun ? territory.Anchor.X : lastSlot.X;
+            //var ay = firstRun ? territory.Anchor.Y : lastSlot.Y;
+            var ax = territory.Anchor.X;
+            var ay = territory.Anchor.Y;
+            var width = territory.Size.X;
+            //var oddHeight = territory.Size.Y;
+            //var height = oddHeight + oddHeight % 2 - 2;
+            var height = territory.HeightToFit;
             var slots = new List<(Point pos, Direction root, Direction dir)>();
+            var max = occupied.Max();
+            var min = occupied.Min();
+
+            //logging
             if (cycle && !firstRun) helixGeneration++;
             List<string> log = new List<string>();
             string level = MethodBase.GetCurrentMethod().Name;
             _ = LogAsync(level, $"Calculating slots for #{territory.Id}: ax={ax}, ay={ay}, width={width}, height={height}, setRoot={setRoot}, quadrant={quadrant}, cycle={cycle}.");
 
+            //finishing routine
             void Select(Point slot, Direction root, Direction dir)
             {
-                //if (slot.X > max.X || slot.X < min.X || slot.Y > max.Y || slot.Y < min.Y)
-                bool canDrift = false;
-                Point drifted = new Point();
-                if (!firstRun)
+                bool front = slot.X > max.X || slot.X < min.X || slot.Y > max.Y || slot.Y < min.Y;
+                if (front || !occupied.Contains(slot))
                 {
-                    drifted = Drift(slot, out _, out _);
-                    canDrift = !occupied.Contains(drifted);
-                }
-                slot = canDrift ? drifted : slot.FitToHex(); //here because drift does its own.
-                if (canDrift || !occupied.Contains(slot))
-                {
-                    slots.Add((slot, root, dir));
+                    slots.Add((slot/*.FitToHex()*/, root, dir));
                     log.Add($"{slot.ToTuple().ToString()}{dir}");
                 }
                 else
                 {
-                    _ = LogAsync(level, $"{slot.ToTuple()}{dir} was occupied, slot skipped! Branch: {root})");
+                    _ = LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {root})");
                 }
             }
 
@@ -591,21 +602,18 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
             if (rootDir == Direction.Down || firstRun)
             {
-                int step = firstRun ? width : 0;
-                if (quadrant) Select(new Point(ax + step, ay - height - vertGap), setRoot ? Direction.Down : rootDir, Direction.Down);
-                if (!firstRun) Select(new Point(ax - width - gap, ay), rootDir, Direction.Left);
+                if (quadrant) Select(new Point(ax + width - 1, ay - height - vertGap), setRoot ? Direction.Down : rootDir, Direction.Down);
+                if (!firstRun) Select(new Point(ax - 1 - gap, ay), rootDir, Direction.Left);
             }
             if (rootDir == Direction.Left || firstRun)
             {
-                int step = firstRun ? 0 : width;
-                if (quadrant) Select(new Point(ax - step - gap, ay), setRoot ? Direction.Left : rootDir, Direction.Left);
-                if (!firstRun) Select(new Point(ax, ay + height + vertGap), rootDir, Direction.Up);
+                if (quadrant) Select(new Point(ax - 1 - gap, ay - height - 2), setRoot ? Direction.Left : rootDir, Direction.Left);
+                if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + vertGap), rootDir, Direction.Up);
             }
             if (rootDir == Direction.Up || firstRun)
             {
-                int step = firstRun ? 0 : height;
-                if (quadrant) Select(new Point(ax, ay + step + vertGap), setRoot ? Direction.Up : rootDir, Direction.Up);
-                if (!firstRun) Select(new Point(ax + width + gap, ay), rootDir, Direction.Right);
+                if (quadrant) Select(new Point(ax, ay + 2 + vertGap), setRoot ? Direction.Up : rootDir, Direction.Up);
+                if (!firstRun) Select(new Point(ax + width + gap, ay - height - 2), rootDir, Direction.Right);
             }
             if (slots.Count() == 0)
             {
@@ -632,6 +640,15 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
         }
 
+        private Point TryDrift(Point position, SortedSet<cPoint> occupied, int width, int height)
+        {
+            if (Drift(position, out var drift) && !Collision(occupied, drift, width, height, out _))
+            {
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{position.ToTuple()} drifted to {drift.ToTuple()}");
+                return drift;
+            }
+            return position;
+        }
         private void UpdateClusterMap(List<Cluster> clusters, int errorY = 0)
         {
             foreach (var c in clusters)
