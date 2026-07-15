@@ -607,13 +607,13 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
             if (rootDir == Direction.Left || firstRun)
             {
-                if (quadrant) Select(new Point(ax - 1 - gap, ay - height - 2), setRoot ? Direction.Left : rootDir, Direction.Left);
+                if (quadrant) Select(new Point(ax - 1 - gap, ay - height + 2), setRoot ? Direction.Left : rootDir, Direction.Left);
                 if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + vertGap), rootDir, Direction.Up);
             }
             if (rootDir == Direction.Up || firstRun)
             {
                 if (quadrant) Select(new Point(ax, ay + 2 + vertGap), setRoot ? Direction.Up : rootDir, Direction.Up);
-                if (!firstRun) Select(new Point(ax + width + gap, ay - height - 2), rootDir, Direction.Right);
+                if (!firstRun) Select(new Point(ax + width + gap, ay - height + 2), rootDir, Direction.Right);
             }
             if (slots.Count() == 0)
             {

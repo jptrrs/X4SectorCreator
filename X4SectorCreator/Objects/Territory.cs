@@ -96,25 +96,16 @@ namespace X4SectorCreator.Objects
             Corner = new Point(box[2], box[3]);
             Anchor = Corner.FitToHex();
             Size = new Point(width,height);
+            overhead = Anchor.Y > box[3];
             //int centerX = width / 2;
             //int centerY = height / 2;
             //Center = new Point(centerX,centerY);
             SetUpClustersOffsets();
         }
 
-        private bool overhead => Anchor.Y > box[3];
-        private int heightToFit = 0;
-        internal int HeightToFit
-        {
-            get
-            { 
-                if (heightToFit == 0)
-                {
-                    heightToFit = overhead ? Size.Y + 1 : Size.Y; 
-                }
-                return heightToFit;
-            }
-        }
+        private bool overhead = false;
+        internal int HeightToFit => overhead ? Size.Y + 1 : Size.Y;
+
 
         internal List<cPoint> Contour
         {
