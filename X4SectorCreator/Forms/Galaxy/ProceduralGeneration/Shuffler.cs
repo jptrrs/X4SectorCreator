@@ -83,7 +83,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         {
             // Gather some basic info
             hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
-            _ = LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}");
+            _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}");
 
             // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
@@ -141,10 +141,10 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             foreach (var territory in territories.Values)
             {
                 territory.SetUpBox();
-                log.Add($"\n{territory.Id} - {territory.Seed.Name}, {territory.Size.X}x{territory.Size.Y} with {territory.Clusters.Count} clusters");
+                log.Add($"\n{territory.Id} - {territory.Seed.Name}, {territory.Clusters.Count} clusters.");
             }
             //logging
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
         }
 
         internal void FindAnnexed()
@@ -165,6 +165,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                         {
                             territory.annexedIds.AddUnique(foundId);
                             territories[foundId].annexedIds.AddUnique(territory.Id);
+                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{territory.Seed.Name} annexed to #{territories[foundId].Id}-{territories[foundId].Seed.Name}");
                         }
                     }
                 }
@@ -193,6 +194,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                         neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.Id));
                     }
                     cluster.BridgeFor.AddRange(grouped.Select(x => x.Id).ToArray());
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{cluster.Name} is a bridge between {string.Join(" & ", grouped.Select(x => ("#"+x.Id, x.Seed.Name)))}");
                 }
             }
         }
@@ -217,7 +219,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         internal void Shuffle()
         {
             //logging
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Shuffling ---", true);
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Shuffling ---", true);
 
             //No turning back now!
             MainForm.Instance.AllClusters.Clear();
@@ -238,11 +240,11 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     if (deferred.Any())
                     {
                         slots = deferred;
-                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Bounds reached, spilling over @ #{territory.Id} - {territory.Seed.Name}...");
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Bounds reached, spilling over @ #{territory.Id} - {territory.Seed.Name}...");
                     }
                     else
                     {
-                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: we've run out of slots! #{territory.Id} - {territory.Seed.Name} and beyond can't be placed...", true);
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: we've run out of slots! #{territory.Id} - {territory.Seed.Name} and beyond can't be placed...", true);
                         break;
                     }
                 }
@@ -252,7 +254,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 var locDir = slot.Value.dir;
                 var rootDir = slot.Value.root;
 
-                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters, to slot @ {newPos.ToTuple()}{locDir}", true);
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters, to slot @ {newPos.ToTuple()}{locDir}", true);
 
                 //Fine-tune the insertion spot so it fits right in.
                 var planned = newPos.Subtract(currentPos);
@@ -271,7 +273,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
                 var cMax = covered.MaxBy(p => p.Y).Y;
                 var cMin = covered.MinBy(p => p.Y).Y;
-                _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{covered.Count} tiles were covered, {cMin} to {cMax} vertical, totalling {occupied.Count} now...");
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{covered.Count} tiles were covered, {cMin} to {cMax} vertical, totalling {occupied.Count} now...");
 
                 //Update the board.
                 UpdateClusterMap(territory.Clusters, i);
@@ -312,13 +314,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             position = result;
             finish:
             return position;
-        }
-
-        private static async Task LogAsync(string level, string message, bool lineSkip = false)
-        {
-            string jump = lineSkip ? "\n" : "";
-            string logEntry = $"{jump}[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{level}] {message}{Environment.NewLine}";
-            await File.AppendAllTextAsync("test.log", logEntry);
         }
 
         private static Point MoveIntoDirection(Direction direction, Point position, int distance)
@@ -387,7 +382,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 if (dodge.IsEmpty)
                 {
                     //This means this slot was boxed in! Last attempt to place it
-                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.Id}: there wasn't enough space for it! Attempting a forced push {root}...");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.Id}: there wasn't enough space for it! Attempting a forced push {root}...");
                     bool placed = false;
                     for (int i = 1; i < 10; i++)
                     {
@@ -396,13 +391,13 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                         {
                             placed = true;
                             dodge = forced.Subtract(offset);
-                            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it {i * 2} tiles {root}.");
+                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it {i * 2} tiles {root}.");
                             break;
                         }
                     }
                     if (!placed)
                     {
-                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"...still couldn't place it over the next 20 tiles! Giving up.");
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...still couldn't place it over the next 20 tiles! Giving up.");
                         return offset;
                     }
                 }
@@ -430,7 +425,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             report.Add($"anchor @ {relative}");
             if (drifted) report.Add($"drifted by {drift.ToTuple()}");
             if (bang) report.Add(collisionReport);
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(" -> ", report) + ".");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(" -> ", report) + ".");
 
             return result;
         }
@@ -494,11 +489,12 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             {
                 return true;
             }
+
             pushX:
             pushVector = new Point(pushX, 0);
             report = $"Collisions @ {hexPos.ToTuple()}, will be pushed horizontally, vector {pushVector.ToTuple()}, viableY={viableY}.";
-
             return true;
+            
             pushY:
             pushVector = new Point(0, pushY);
             report = $"Collisions @ {hexPos.ToTuple()}, will be pushed vertically, vector {pushVector.ToTuple()}, viableY={viableX}";
@@ -537,7 +533,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             //Conclusion
             vector = GetDriftVector(pos, GetDriftDirection(pos), moveX, moveY);
             bool acted = !vector.IsEmpty;
-            if (acted) _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{pos.ToTuple()} -> {vector.ToTuple()}.");
+            if (acted) _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{pos.ToTuple()} -> {vector.ToTuple()}.");
             return acted;
         }
 
@@ -594,7 +590,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         private void HandleMisplaced()
         {
             if (misplaced.Count == 0) return;
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{misplaced.Count} clusters were misplaced and will be set aside...", true);
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{misplaced.Count} clusters were misplaced and will be set aside...", true);
             int y = 1;
             foreach (var c in misplaced)
             {
@@ -602,11 +598,11 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 y++;
                 if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
-                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{c.Name}, territory #{c.AssignedTerritoryId}, placed @ ({c.Position.ToTuple()}).");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{c.Name}, territory #{c.AssignedTerritoryId}, placed @ ({c.Position.ToTuple()}).");
                 }
                 else
                 {
-                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: couldn't place {c.Name}, territory #{c.AssignedTerritoryId}, anywhere! Last attempt: {c.Position.ToTuple()}.");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: couldn't place {c.Name}, territory #{c.AssignedTerritoryId}, anywhere! Last attempt: {c.Position.ToTuple()}.");
                 }
             }
         }
@@ -641,7 +637,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
                 else
                 {
-                    _ = LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {root})");
+                    _ = Toolbox.LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {root})");
                 }
             }
 
@@ -668,9 +664,9 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
             if (slots.Count() == 0)
             {
-                _ = LogAsync(level, $"No Slots found for #{territory.Id}! Branch: {rootDir})");
+                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.Id}! Branch: {rootDir})");
             }
-            _ = LogAsync(level, $"Slots around #{territory.Id}: {string.Join(", ", log)} (branch: {rootDir}, gen: {helixGeneration}).");
+            _ = Toolbox.LogAsync(level, $"Slots around #{territory.Id}: {string.Join(", ", log)} (branch: {rootDir}, gen: {helixGeneration}).");
 
             //House keeping
             helixLastDir = rootDir;
@@ -695,7 +691,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             {
                 if (!MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
-                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing {c.Name} @ {c.Position.ToTuple()}, set aside...");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing {c.Name} @ {c.Position.ToTuple()}, set aside...");
                     misplaced.Add(c);
                 }
             }
