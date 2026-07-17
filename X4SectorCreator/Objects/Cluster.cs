@@ -1,8 +1,6 @@
-﻿using System.Linq;
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using X4SectorCreator.Forms;
 using X4SectorCreator.Helpers;
-using static X4SectorCreator.Objects.Job;
 
 namespace X4SectorCreator.Objects
 {
@@ -167,16 +165,13 @@ namespace X4SectorCreator.Objects
                 var right = Position.X + 1;
                 var upSide = Position.Y + 1;
                 var downSide = Position.Y - 1;
-                return 
-                [
-                Position,
-                new Point(Position.X, Position.Y + 2),
-                new Point(Position.X, Position.Y - 2),
-                new Point(left, upSide),
-                new Point(left, downSide),
-                new Point(right, upSide),
-                new Point(right, downSide),
-                ];
+                List<cPoint> set = new List<cPoint>()
+                {
+                    new Point(Position.X, Position.Y + 2),
+                    new Point(Position.X, Position.Y - 2),
+                };
+                set.AddRange(Toolbox.Spread(3, 3, coord => new Point(left + coord.a, upSide - coord.b)).Select(p => (cPoint)p));
+                return set;
             }
         }
     }

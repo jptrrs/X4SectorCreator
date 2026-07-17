@@ -5,7 +5,7 @@ namespace X4SectorCreator.Helpers
 {
     internal static class ClusterManager
     {
-        public static void Group(
+        internal static void Group(
             IEnumerable<Cluster> items,
             Action<Cluster, bool> process,
             Func<Cluster, List<Point>> selector,
@@ -72,7 +72,7 @@ namespace X4SectorCreator.Helpers
             progress?.Report(100);
         }
 
-        public static List<(Cluster, Sector, Gate, Sector)> PickDestinations(IEnumerable<Cluster> items, Predicate<Cluster> filter)
+        internal static List<(Cluster, Sector, Gate, Sector)> PickDestinations(IEnumerable<Cluster> items, Predicate<Cluster> filter)
         {
             var result = new List<(Cluster, Sector, Gate, Sector)>();
             foreach (Cluster cluster in items)
@@ -82,7 +82,7 @@ namespace X4SectorCreator.Helpers
             return result;
         }
 
-        public static List<(Sector, Gate, Sector)> PickDestinationsFromCluster(Cluster cluster, Predicate<Cluster> filter = null)
+        internal static List<(Sector, Gate, Sector)> PickDestinationsFromCluster(Cluster cluster, Predicate<Cluster> filter = null)
         {
             var result = new List<(Sector, Gate, Sector)>();
             if (cluster.Sectors?.Count == 0) return result;
@@ -103,7 +103,7 @@ namespace X4SectorCreator.Helpers
             return result;
         }
 
-        public static (int cols, int rows) FrameHexGrid(List<Cluster> allClusters, int margin = 0)
+        internal static (int cols, int rows) FrameHexGrid(List<Cluster> allClusters, int margin = 0)
         {
             int cols, rows = 0;
 

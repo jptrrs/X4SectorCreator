@@ -341,7 +341,7 @@ namespace X4SectorCreator.Helpers
             return new Point(p1.X - p2.X, p1.Y - p2.Y);
         }
 
-        // Easier conversion point/tuple
+        // Easier conversion from point to tuple
         public static (int, int) ToTuple(this Point p)
         {
             return (p.X, p.Y);
@@ -380,6 +380,22 @@ namespace X4SectorCreator.Helpers
                 }
             }
             if (!supressLog && (original != target)) File.AppendAllTextAsync("test.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [FitToHex] Moved {original.ToTuple()} {bias} to {target.ToTuple()}{Environment.NewLine}");
+            return target;
+        }
+
+        public static Point WiggleToFit(this Point target, SortedSet<cPoint> occupied)
+        {
+            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
+            {
+                var pos = new Point(target.X, target.Y + 1);
+                if (occupied.Contains(pos))
+                {
+                    pos = new Point(target.X, target.Y - 1);
+                    if (occupied.Contains(pos)) goto Fail;
+                }
+                return pos;
+            }
+            Fail:
             return target;
         }
 
