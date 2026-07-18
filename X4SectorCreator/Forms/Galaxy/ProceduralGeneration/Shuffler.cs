@@ -1,7 +1,9 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Windows.Markup;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TreeView;
 
 namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 {
@@ -20,6 +22,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         internal List<Cluster> misplaced = [];
         internal Point occupiedMax;
         internal Dictionary<int, Territory> territories = [];
+        internal Dictionary<int, int[]> domains = [];
+        private Dictionary<Direction, HashSet<int>> staged = [];
 
         private static readonly (int dx, int dy)[] NeighborOffsets =
         [
@@ -93,13 +97,15 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             FindAnnexed();
             // Determine if there are other close territories owned by the same faction and separated by only a neutral sector.
             FindCloseColonies();
+            // Consolidate neighbouring territories with the same owner under merged domains.
+            ConsolidateDomains();
             // Shuffle!
             Shuffle();
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
         }
 
-        internal int vertGap => gap * 2;
+        internal static int VertGap => gap * 2;
 
         private static (int maxX, int maxY) GridFrameBounds => (hexGridFrame.cols / 2, hexGridFrame.rows / 2);
 
@@ -154,9 +160,9 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 if (territory.ExitPoints?.Count == 0) continue;
                 foreach (var entry in territory.ExitPoints)
                 {
-                    var origin = entry.Item2;
-                    var gate = entry.Item3;
-                    var destination = entry.Item4;
+                    var origin = entry.origin;
+                    var gate = entry.gate;
+                    var destination = entry.destination;
                     var foundId = destination.AssignedTerritoryId;
                     if (foundId > 0)
                     {
@@ -166,10 +172,87 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                             territory.annexedIds.AddUnique(foundId);
                             territories[foundId].annexedIds.AddUnique(territory.Id);
                             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{territory.Seed.Name} annexed to #{territories[foundId].Id}-{territories[foundId].Seed.Name}");
+                            // register pair into the class-level domains dictionary
+                            var key = domains.Count + 1;
+                            domains.Add(key, [territory.Id, foundId]);
                         }
                     }
                 }
             }
+        }
+
+        internal void ConsolidateDomains()
+        {
+            // Build groups by merging any overlapping sets into larger ones.
+            var groups = new List<HashSet<int>>();
+
+            foreach (var values in domains.Values)
+            {
+                if (values == null || values.Length < 2) continue;
+                int a = values[0];
+                int b = values[1];
+                int c = values.Length > 2 ? values[2] : -1;
+
+                // Find all existing groups that intersect this set
+                var intersecting = groups.Where(g => g.Contains(a) || g.Contains(b) || g.Contains(c)).ToList();
+
+                if (intersecting.Count == 0)
+                {
+                    // new group
+                    if (c > 0) groups.Add(new HashSet<int> { a, b, c });
+                    else groups.Add(new HashSet<int> { a, b });
+                }
+                else
+                {
+                    // merge all intersecting groups plus the set into the first one
+                    var target = intersecting.First();
+                    target.Add(a);
+                    target.Add(b);
+                    if (c > 0) target.Add(c);
+
+                    foreach (var g in intersecting.Skip(1))
+                    {
+                        foreach (var id in g)
+                        {
+                            target.Add(id);
+                            groups.Remove(g);
+                        }
+                    }
+                }
+            }
+
+            // rebuild the dictionary so each entry is a consolidated domain.
+            var consolidated = new Dictionary<int, int[]>();
+            int idx = 1;
+            foreach (var g in groups)
+            {
+                consolidated.Add(idx++, g.OrderBy(x => x).ToArray());
+            }
+
+            domains = DesignatedDomains(consolidated);
+
+            // logging
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(kv => $"#{kv.Key}=[{string.Join(',', kv.Value)}]"))}");
+        }
+
+        internal Dictionary<int, int[]> DesignatedDomains(Dictionary<int, int[]> set)
+        {
+            if (!set.Any()) return set;
+            foreach (var d in set)
+            {
+                foreach (var id in d.Value)
+                {
+                    territories[id].AssignedDomainId = d.Key;
+                }
+            }
+            var i = set.Count + 1;
+            foreach (var t in territories.Values.Where(t => t.AssignedDomainId == 0))
+            {
+                var n = i++;
+                t.AssignedDomainId = n;
+                set.Add(n, [t.Id]);
+            }
+            return set;
         }
 
         internal void FindCloseColonies()
@@ -193,8 +276,13 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     {
                         neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.Id));
                     }
-                    cluster.BridgeFor.AddRange(grouped.Select(x => x.Id).ToArray());
+                    var bridged = grouped.Select(x => x.Id).ToArray();
+                    cluster.BridgeFor.AddRange(bridged);
                     _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{cluster.Name} is a bridge between {string.Join(" & ", grouped.Select(x => ("#"+x.Id, x.Seed.Name)))}");
+
+                    // register pair into the class-level domains dictionary
+                    var key = domains.Count + 1;
+                    domains.Add(key, bridged.Append(cluster.Id).ToArray());
                 }
             }
         }
@@ -216,6 +304,28 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
         }
 
+        internal Territory PickNextFromStaged(Direction branch)
+        {
+            if (!domains.Any()) return null;
+            var set = domains.Random();
+            if (!staged.Any()) //First run, no branches yet.
+            {
+                staged.Add(Direction.Right, []);
+                staged.Add(Direction.Down, []);
+                staged.Add(Direction.Left, []);
+                staged.Add(Direction.Up,[]);
+                branch = (Direction)Enum.ToObject(typeof(Direction), Random.Shared.Next(1, 4));
+            }
+            if (!staged[branch].Any())
+            {
+                staged[branch] = set.Value.ToHashSet();
+                domains.Remove(set.Key);
+            }
+            var card = staged[branch].RandomOrDefault();
+            staged[branch].Remove(card);
+            return territories[card] ?? null;
+        }
+
         internal void Shuffle()
         {
             //logging
@@ -226,33 +336,33 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            var slots = new OrderedDictionary<Point, (Direction root, Direction dir)>() { [new Point(0, 0)] = (Direction.Undefined, Direction.Undefined) };
-            var deferred = new OrderedDictionary<Point, (Direction root, Direction dir)>();
+            var slots = new OrderedDictionary<Point, (Direction root, Direction dir, int parent)>() { [new Point(0, 0)] = (Direction.Undefined, Direction.Undefined, 0) };
+            var deferred = new OrderedDictionary<Point, (Direction root, Direction dir, int)>();
             SortedSet<cPoint> occupied = new SortedSet<cPoint>();
-            for (int i = 0; i < cards.Count(); i++)
+            for (int i = 0; i < cards.Count; i++)
             {
-                //Select next territory and pick the next slot.
-                int card = cards[i];
-                var territory = territories[card];
-                var currentPos = territory.Anchor;
+                //Pick the next slot.
                 if (!slots.Any())
                 {
                     if (deferred.Any())
                     {
                         slots = deferred;
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Bounds reached, spilling over @ #{territory.Id} - {territory.Seed.Name}...");
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Bounds reached, spilling over!");
                     }
                     else
                     {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: we've run out of slots! #{territory.Id} - {territory.Seed.Name} and beyond can't be placed...", true);
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: we've run out of slots!", true);
                         break;
                     }
                 }
                 var slot = slots.First();
-                var pos = slot.Key;
-                var newPos = pos;
+                var newPos = slot.Key;
                 var locDir = slot.Value.dir;
                 var rootDir = slot.Value.root;
+
+                //Select next territory.
+                var territory = PickNextFromStaged(rootDir);
+                var currentPos = territory.Anchor;
 
                 _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters, to slot @ {newPos.ToTuple()}{locDir}", true);
 
@@ -281,10 +391,10 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 //Prepare the next slots.
                 slots.RemoveAt(0);
                 var nextSlots = NextSlotsHelix(newPos, territory, rootDir, occupied);
-                foreach (var (p, root, dir) in nextSlots)
+                foreach (var (pos, root, dir, pid) in nextSlots)
                 {
-                    if (InBounds(p)) slots.TryAdd(p, (root, dir));
-                    else deferred.TryAdd(p, (root, dir));
+                    if (InBounds(pos)) slots.TryAdd(pos, (root, dir, pid));
+                    else deferred.TryAdd(pos, (root, dir, pid));
                 }
             }
             HandleMisplaced();
@@ -494,7 +604,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             pushVector = new Point(pushX, 0);
             report = $"Collisions @ {hexPos.ToTuple()}, will be pushed horizontally, vector {pushVector.ToTuple()}, viableY={viableY}.";
             return true;
-            
+
             pushY:
             pushVector = new Point(0, pushY);
             report = $"Collisions @ {hexPos.ToTuple()}, will be pushed vertically, vector {pushVector.ToTuple()}, viableY={viableX}";
@@ -594,7 +704,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             int y = 1;
             foreach (var c in misplaced)
             {
-                c.Position = occupiedMax.Add(new Point(gap, y * vertGap - vertGap)).FitToHex();
+                c.Position = occupiedMax.Add(new Point(gap, y * VertGap - VertGap)).FitToHex();
                 y++;
                 if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
@@ -607,7 +717,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
         }
 
-        private List<(Point pos, Direction rootDir, Direction dir)> NextSlotsHelix(Point lastSlot, Territory territory, Direction rootDir, SortedSet<cPoint> occupied)
+        private List<(Point pos, Direction rootDir, Direction dir, int parent)> NextSlotsHelix(Point lastSlot, Territory territory, Direction rootDir, SortedSet<cPoint> occupied)
         {
             bool setRoot = rootDir == Direction.Undefined ? true : false;
             bool firstRun = rootDir == Direction.Undefined;
@@ -617,7 +727,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             var ay = territory.Anchor.Y;
             var width = territory.Size.X;
             var height = territory.HeightToFit;
-            var slots = new List<(Point pos, Direction root, Direction dir)>();
+            var slots = new List<(Point pos, Direction root, Direction dir, int parent)>();
             var max = occupied.Max();
             var min = occupied.Min();
 
@@ -632,7 +742,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 bool front = slot.X > max.X || slot.X < min.X || slot.Y > max.Y || slot.Y < min.Y;
                 if (front || !occupied.Contains(slot))
                 {
-                    slots.Add((slot, root, dir));
+                    slots.Add((slot, root, dir, territory.Id));
                     log.Add($"{slot.ToTuple().ToString()}{dir}");
                 }
                 else
@@ -645,21 +755,21 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             if (rootDir == Direction.Right || firstRun)
             {
                 if (quadrant) Select(new Point(ax + width + gap, ay), setRoot ? Direction.Right : rootDir, Direction.Right);
-                if (!firstRun) Select(new Point(ax, ay - height - vertGap), rootDir, Direction.Down);
+                if (!firstRun) Select(new Point(ax, ay - height - VertGap), rootDir, Direction.Down);
             }
             if (rootDir == Direction.Down || firstRun)
             {
-                if (quadrant) Select(new Point(ax + width - 1, ay - height - vertGap), setRoot ? Direction.Down : rootDir, Direction.Down);
+                if (quadrant) Select(new Point(ax + width - 1, ay - height - VertGap), setRoot ? Direction.Down : rootDir, Direction.Down);
                 if (!firstRun) Select(new Point(ax - 1 - gap, ay), rootDir, Direction.Left);
             }
             if (rootDir == Direction.Left || firstRun)
             {
                 if (quadrant) Select(new Point(ax - 1 - gap, ay - height + 2), setRoot ? Direction.Left : rootDir, Direction.Left);
-                if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + vertGap), rootDir, Direction.Up);
+                if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + VertGap), rootDir, Direction.Up);
             }
             if (rootDir == Direction.Up || firstRun)
             {
-                if (quadrant) Select(new Point(ax, ay + 2 + vertGap), setRoot ? Direction.Up : rootDir, Direction.Up);
+                if (quadrant) Select(new Point(ax, ay + 2 + VertGap), setRoot ? Direction.Up : rootDir, Direction.Up);
                 if (!firstRun) Select(new Point(ax + width + gap, ay - height + 2), rootDir, Direction.Right);
             }
             if (slots.Count() == 0)

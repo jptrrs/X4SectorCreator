@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using X4SectorCreator.Helpers;
+﻿using X4SectorCreator.Helpers;
 
 namespace X4SectorCreator.Objects
 {
@@ -11,7 +6,7 @@ namespace X4SectorCreator.Objects
     {
         internal Cluster Seed;
         internal string Dlc;
-        internal int Id;
+        internal int Id, AssignedDomainId;
         internal List<Cluster> Frontiers = new List<Cluster>();
         internal List<Sector> Destinations = new List<Sector>();
         internal Dictionary<Sector, List<(Gate, Sector)>> Exits = new Dictionary<Sector, List<(Gate, Sector)>>();
@@ -78,6 +73,7 @@ namespace X4SectorCreator.Objects
         {
             Clusters = [seed];
             Id = lastID + 1;
+            AssignedDomainId = 0;
             Seed = seed;
             Dlc = seed.Dlc;
         }
