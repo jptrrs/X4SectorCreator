@@ -22,8 +22,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         internal List<Cluster> misplaced = [];
         internal Point occupiedMax;
         internal Dictionary<int, Territory> territories = [];
-        internal Dictionary<int, int[]> domains = [];
-        private Dictionary<Direction, HashSet<int>> staged = [];
+        internal Dictionary<int, List<int>> domains = [];
+        private Dictionary<Direction, List<int>> staged = [];
 
         private static readonly (int dx, int dy)[] NeighborOffsets =
         [
@@ -93,9 +93,9 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             CarveTerritories(clusters);
             // Map connections for all clusters and register entry points for territories
             FindConnections();
-            // Determine if there are neighboring territories owned by the same faction
+            // Determine if there are neighboring territories owned by the same faction TO-DO: exclude the Xenon! 
             FindAnnexed();
-            // Determine if there are other close territories owned by the same faction and separated by only a neutral sector.
+            // Determine if there are other close territories owned by the same faction and separated by only a neutral sector. TO-DO: exclude the Xenon! 
             FindCloseColonies();
             // Consolidate neighbouring territories with the same owner under merged domains.
             ConsolidateDomains();
@@ -167,7 +167,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     if (foundId > 0)
                     {
                         if (territory.annexedIds.Contains(foundId)) continue;
-                        if (origin.Owner != null && origin.Owner.Equals(destination.Owner, StringComparison.Ordinal))
+                        if (origin.Owner != null && !origin.IsNeutral && origin.Owner.Equals(destination.Owner, StringComparison.Ordinal))
                         {
                             territory.annexedIds.AddUnique(foundId);
                             territories[foundId].annexedIds.AddUnique(territory.Id);
@@ -183,15 +183,17 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
         internal void ConsolidateDomains()
         {
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{domains.Count} raw domain(s): {string.Join("; ", domains.Select(kv => $"#{kv.Key}=[{string.Join(',', kv.Value)}]"))}");
+
             // Build groups by merging any overlapping sets into larger ones.
             var groups = new List<HashSet<int>>();
 
             foreach (var values in domains.Values)
             {
-                if (values == null || values.Length < 2) continue;
+                if (values == null || values.Count < 2) continue;
                 int a = values[0];
                 int b = values[1];
-                int c = values.Length > 2 ? values[2] : -1;
+                int c = values.Count > 2 ? values[2] : -1;
 
                 // Find all existing groups that intersect this set
                 var intersecting = groups.Where(g => g.Contains(a) || g.Contains(b) || g.Contains(c)).ToList();
@@ -222,20 +224,32 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
 
             // rebuild the dictionary so each entry is a consolidated domain.
-            var consolidated = new Dictionary<int, int[]>();
+            var consolidated = new Dictionary<int, List<int>>();
             int idx = 1;
+            int count = 0;
             foreach (var g in groups)
             {
-                consolidated.Add(idx++, g.OrderBy(x => x).ToArray());
+                count += g.Count;
+                List<int> reordered = [];
+                if (g.Any(x => territories[x].IsBridge)) //spares close colonies sets.
+                {
+                    reordered = g.ToList();
+                }
+                else
+                {
+                    reordered = g.OrderBy(x => Random.Shared.Next()).ToList();
+                }
+                consolidated.Add(idx++, reordered);
             }
 
             domains = DesignatedDomains(consolidated);
+            count += domains.Count - idx;
 
             // logging
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(kv => $"#{kv.Key}=[{string.Join(',', kv.Value)}]"))}");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(kv => $"#{kv.Key}=[{string.Join(',', kv.Value)}]"))}\n{count} territories total.");
         }
 
-        internal Dictionary<int, int[]> DesignatedDomains(Dictionary<int, int[]> set)
+        internal Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
         {
             if (!set.Any()) return set;
             foreach (var d in set)
@@ -259,7 +273,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         {
             var candidates = territories.Values
                 .SelectMany(t => t.Frontiers)
-                .Where(c => c.ExitPoints?.Count > 1 && c.Exits.Keys.All(y => y.IsNeutral))
+                .Where(c => c.ExitPoints?.Count > 1 && c.Exits.Keys.All(s => s.IsNeutral))
                 .ToList();
             foreach (var cluster in candidates)
             {
@@ -276,13 +290,14 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     {
                         neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.Id));
                     }
-                    var bridged = grouped.Select(x => x.Id).ToArray();
+                    var bridged = grouped.Select(x => x.Id).ToList();
                     cluster.BridgeFor.AddRange(bridged);
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{cluster.Name} is a bridge between {string.Join(" & ", grouped.Select(x => ("#"+x.Id, x.Seed.Name)))}");
-
-                    // register pair into the class-level domains dictionary
-                    var key = domains.Count + 1;
-                    domains.Add(key, bridged.Append(cluster.Id).ToArray());
+                    var bridge = territories[cluster.AssignedTerritoryId];
+                    bridge.IsBridge = true;
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{bridge.Id}-{bridge.Seed.Name} is a bridge between {string.Join(" & ", grouped.Select(x => ("#"+x.Id, x.Seed.Name)))}");
+                    // register set into the class-level domains dictionary
+                    var id = domains.Count + 1;
+                    domains.Add(id, bridged.Prepend(bridge.Id).ToList());
                 }
             }
         }
@@ -304,28 +319,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
         }
 
-        internal Territory PickNextFromStaged(Direction branch)
-        {
-            if (!domains.Any()) return null;
-            var set = domains.Random();
-            if (!staged.Any()) //First run, no branches yet.
-            {
-                staged.Add(Direction.Right, []);
-                staged.Add(Direction.Down, []);
-                staged.Add(Direction.Left, []);
-                staged.Add(Direction.Up,[]);
-                branch = (Direction)Enum.ToObject(typeof(Direction), Random.Shared.Next(1, 4));
-            }
-            if (!staged[branch].Any())
-            {
-                staged[branch] = set.Value.ToHashSet();
-                domains.Remove(set.Key);
-            }
-            var card = staged[branch].RandomOrDefault();
-            staged[branch].Remove(card);
-            return territories[card] ?? null;
-        }
-
         internal void Shuffle()
         {
             //logging
@@ -341,6 +334,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             SortedSet<cPoint> occupied = new SortedSet<cPoint>();
             for (int i = 0; i < cards.Count; i++)
             {
+                Selection:
                 //Pick the next slot.
                 if (!slots.Any())
                 {
@@ -362,6 +356,12 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
                 //Select next territory.
                 var territory = PickNextFromStaged(rootDir);
+                if (territory == null)
+                {
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"No territory remains for branch {rootDir}, skipping. Last direction was {helixLastDir}.\nNext Staged: right={staged[Direction.Right].Count}, down={staged[Direction.Down].Count}, left={staged[Direction.Left].Count}, up={staged[Direction.Up].Count}. Slots remaining: {slots.Count}", true);
+                    slots.RemoveAt(0);
+                    goto Selection;
+                }
                 var currentPos = territory.Anchor;
 
                 _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters, to slot @ {newPos.ToTuple()}{locDir}", true);
@@ -398,6 +398,46 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
             }
             HandleMisplaced();
+        }
+
+        internal Territory PickNextFromStaged(Direction branch)
+        {
+            bool domsRemain = domains.Count > 0;
+            bool stagedRemain = staged.Count > 0;
+            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0))
+            {
+                //If something hasn't been intialized or the lists have been exausted.
+                return null;
+            }
+            else if (!stagedRemain)
+            {
+                //First run, no branches yet.
+                staged.Add(Direction.Right, []);
+                staged.Add(Direction.Down, []);
+                staged.Add(Direction.Left, []);
+                staged.Add(Direction.Up, []);
+                branch = (Direction)Enum.ToObject(typeof(Direction), Random.Shared.Next(1, 4));
+            }
+            if (staged[branch].Count == 0)
+            {
+                //The requested branch is currently empty, so...
+                if (domsRemain)
+                {
+                    //...load another set
+                    var set = domains.Random();
+                    staged[branch] = set.Value;
+                    domains.Remove(set.Key);
+                }
+                else return null; //...give up
+            }
+            var selected = staged[branch].Where(x => territories.ContainsKey(x));
+            if (!selected.Any())
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: none of the {staged[branch].Count} territories selected for branch {branch} could be found! ");
+            }
+            int card = selected.Any(x => territories[x].IsBridge) ? selected.First() : selected.RandomOrDefault(); 
+            staged[branch].Remove(card);
+            return territories[card];
         }
 
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)

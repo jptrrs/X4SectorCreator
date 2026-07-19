@@ -18,6 +18,7 @@ namespace X4SectorCreator.Objects
         internal Point Size = new Point();
         internal Point Anchor = new Point();
         internal Point Corner = new Point();
+        internal bool IsBridge = false;
 
         /// <summary>
         /// A list of connections to/from a territory.
