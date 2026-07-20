@@ -532,16 +532,35 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 if (dodge.IsEmpty)
                 {
                     //This means this slot was boxed in! Last attempt to place it
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.Id}: there wasn't enough space for it! Attempting a forced push {root}...");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.Id}: there wasn't enough space for it! Attempting a forced push...");
                     bool placed = false;
-                    for (int i = 1; i < 10; i++)
+                    for (int i = 1; i < 20; i++)
                     {
-                        Point forced = MoveIntoDirection(root, offset, i * 2);
-                        if (!SimpleCollision(occupied, forced, width, height))
+                        bool sucess = false;
+                        Point target = new Point();
+                        Direction chosenDir = new Direction();
+                        Point forced1 = MoveIntoDirection(root, offset, i);
+                        if (!SimpleCollision(occupied, forced1, width, height))
+                        {
+                            sucess = true;
+                            target = forced1;
+                            chosenDir = root;
+                        }
+                        else
+                        {
+                            Point forced2 = MoveIntoDirection(dir, offset, i);
+                            if (!SimpleCollision(occupied, forced2, width, height))
+                            {
+                                sucess = true;
+                                target = forced2;
+                                chosenDir = dir;
+                            }
+                        }
+                        if (sucess) 
                         {
                             placed = true;
-                            dodge = forced.Subtract(offset);
-                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it {i * 2} tiles {root}.");
+                            dodge = target.Subtract(offset);
+                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it {i} tiles {chosenDir}.");
                             break;
                         }
                     }
@@ -582,7 +601,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
         private bool Collision(SortedSet<cPoint> occupied, Point position, int width, int height, Direction preferredDir, ref string report, out Point pushVector)
         {
-            var hexPos = position.FitToHex(); //not fitting could result in undetected collisions
+            var hexPos = position.WiggleToFit(occupied); //not fitting could result in undetected collisions
             var hits = ScanForCollisions(occupied, hexPos, width, height);
             pushVector = new Point();
             if (!hits.Any()) return false;
@@ -682,9 +701,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
             //Conclusion
             vector = GetDriftVector(pos, GetDriftDirection(pos), moveX, moveY);
-            bool acted = !vector.IsEmpty;
-            if (acted) _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{pos.ToTuple()} -> {vector.ToTuple()}.");
-            return acted;
+            return !vector.IsEmpty;
         }
 
         private Direction GetDriftDirection(Point pos)
