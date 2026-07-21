@@ -23,7 +23,10 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         internal Point occupiedMax;
         internal Dictionary<int, Territory> territories = [];
         internal Dictionary<int, List<int>> domains = [];
-        private Dictionary<Direction, List<int>> staged = [];
+        internal HashSet<int> sequentialDomains = [];
+        private Dictionary<Direction, List<int>> stagedOld = []; // remove!!!
+        private Dictionary<ulong, List<int>> staged = [];
+
 
         private static readonly (int dx, int dy)[] NeighborOffsets =
         [
@@ -66,8 +69,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return !territory.Clusters.Contains(cluster);
         };
 
-        private float helixGeneration = 0;
-        private Direction helixLastDir = Direction.Up;
+        private int helixGeneration = 1;
+        private Direction helixLastBranch = Direction.Up;
 
         private Func<Point, bool> InBounds = p =>
         {
@@ -183,8 +186,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
         internal void ConsolidateDomains()
         {
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{domains.Count} raw domain(s): {string.Join("; ", domains.Select(kv => $"#{kv.Key}=[{string.Join(',', kv.Value)}]"))}");
-
             // Build groups by merging any overlapping sets into larger ones.
             var groups = new List<HashSet<int>>();
 
@@ -234,6 +235,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 if (g.Any(x => territories[x].IsBridge)) //spares close colonies sets.
                 {
                     reordered = g.ToList();
+                    sequentialDomains.Add(idx); //note that down for later.
                 }
                 else
                 {
@@ -241,12 +243,11 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
                 consolidated.Add(idx++, reordered);
             }
-
             domains = DesignatedDomains(consolidated);
             count += domains.Count - idx;
 
             // logging
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(kv => $"#{kv.Key}=[{string.Join(',', kv.Value)}]"))}\n{count} territories total.");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}\n{count} territories total.");
         }
 
         internal Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
@@ -294,7 +295,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     cluster.BridgeFor.AddRange(bridged);
                     var bridge = territories[cluster.AssignedTerritoryId];
                     bridge.IsBridge = true;
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{bridge.Id}-{bridge.Seed.Name} is a bridge between {string.Join(" & ", grouped.Select(x => ("#"+x.Id, x.Seed.Name)))}");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{bridge.Id}-{bridge.Seed.Name} is a bridge between {string.Join(" & ", grouped.Select(x => ("#" + x.Id, x.Seed.Name)))}");
                     // register set into the class-level domains dictionary
                     var id = domains.Count + 1;
                     domains.Add(id, bridged.Prepend(bridge.Id).ToList());
@@ -329,14 +330,14 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            var slots = new OrderedDictionary<Point, (Direction root, Direction dir, int parent)>() { [new Point(0, 0)] = (Direction.Undefined, Direction.Undefined, 0) };
-            var deferred = new OrderedDictionary<Point, (Direction root, Direction dir, int)>();
+            var slots = new Queue<(Point pos, ulong add, int gen)>([(new Point(0, 0), 0UL, 0)]);
+            var deferred = new Queue<(Point pos, ulong add, int gen)>();
             SortedSet<cPoint> occupied = new SortedSet<cPoint>();
             for (int i = 0; i < cards.Count; i++)
             {
                 Selection:
                 //Pick the next slot.
-                if (!slots.Any())
+                if (slots.Count == 0)
                 {
                     if (deferred.Any())
                     {
@@ -349,26 +350,26 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                         break;
                     }
                 }
-                var slot = slots.First();
-                var newPos = slot.Key;
-                var locDir = slot.Value.dir;
-                var rootDir = slot.Value.root;
+                var slot = slots.Dequeue();
+                var newPos = slot.pos;
+                var dir = slot.add.GetDirection();
+                var branch = slot.add.GetMainBranch(slot.gen);
 
                 //Select next territory.
-                var territory = PickNextFromStaged(rootDir);
+                bool sequencesAllowed = dir == Direction.Undefined || dir == branch;
+                var territory = PickNextFromStaged(slot.add, slot.gen, sequencesAllowed);
                 if (territory == null)
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"No territory remains for branch {rootDir}, skipping. Last direction was {helixLastDir}.\nNext Staged: right={staged[Direction.Right].Count}, down={staged[Direction.Down].Count}, left={staged[Direction.Left].Count}, up={staged[Direction.Up].Count}. Slots remaining: {slots.Count}", true);
-                    slots.RemoveAt(0);
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"No territory remaining to be assigned to branch {branch}, skipping. Last direction was {helixLastBranch}, {staged.Count} staged sets and {slots.Count} slots remaining.");
                     goto Selection;
                 }
                 var currentPos = territory.Anchor;
 
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters, to slot @ {newPos.ToTuple()}{locDir}", true);
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters, to slot @ {newPos.ToTuple()}{dir}", true);
 
                 //Fine-tune the insertion spot so it fits right in.
                 var planned = newPos.Subtract(currentPos);
-                if (i > 0) newPos = AdjustForInsertion(territory, planned, rootDir, locDir, occupied); //fitted
+                if (i > 0) newPos = AdjustForInsertion(territory, planned, branch, dir, occupied); //fitted
 
                 //Move the piece
                 var move = newPos.Subtract(currentPos); //defitted
@@ -389,55 +390,94 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 UpdateClusterMap(territory.Clusters, i);
 
                 //Prepare the next slots.
-                slots.RemoveAt(0);
-                var nextSlots = NextSlotsHelix(newPos, territory, rootDir, occupied);
-                foreach (var (pos, root, dir, pid) in nextSlots)
+                var nextSlots = NextSlotsHelix(territory, occupied, slot.add, slot.gen);
+                foreach (var (pos, add, gen) in nextSlots)
                 {
-                    if (InBounds(pos)) slots.TryAdd(pos, (root, dir, pid));
-                    else deferred.TryAdd(pos, (root, dir, pid));
+                    if (InBounds(pos)) slots.Enqueue((pos, add, gen));
+                    else deferred.Enqueue((pos, add, gen));
                 }
             }
             HandleMisplaced();
         }
 
-        internal Territory PickNextFromStaged(Direction branch)
+        //pick next refactor
+        //1. receive an ulong and a int for depth, representing a slot.
+        //2. null guard remains the same
+        //3. ulong tells us the root - enough for the current sorting mechanism. But also where the slot came from - the parent - so domains that require following the sequence can be corectly picked. -> need to diferentiate them and revert back to root logic until the cycle comes around again.
+        //3. look for a staged entry indexed by that ulong: root for regular placement, particular path for sequenced domains. If there isn't one, draw randomly from domains (similar to now) and index with that ulong.
+        //4. return drawing from that set.
+
+        private bool HasAncestorStaged(ulong path, int generation, out ulong found)
+        {
+            if (generation <= 2) goto fail; //that would just return the trunk or main branch
+            bool flag = false;
+            for (var i = generation - 1; i > 1; i--)
+            {
+                var tested = path.GetAddressAtDepth(generation, i);
+                flag = staged.ContainsKey(tested);
+                if (flag)
+                {
+                    found = tested;
+                    return true;
+                }
+            }
+            fail:
+            found = path;
+            return false;
+        }
+
+        internal Territory PickNextFromStaged(ulong path, int generation, bool sequencesAllowed)
         {
             bool domsRemain = domains.Count > 0;
             bool stagedRemain = staged.Count > 0;
-            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0))
+            //Bail out if something hasn't been intialized or the lists have been exausted.
+            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0)) return null;
+            bool isSequence = HasAncestorStaged(path, generation, out ulong ancestor);
+            var branch = isSequence ? ancestor : path.GetAddressAtDepth(generation, 1); //selects either the root branch or the divergence point for a sequence
+            if (!isSequence && !staged.ContainsKey(branch))
             {
-                //If something hasn't been intialized or the lists have been exausted.
-                return null;
-            }
-            else if (!stagedRemain)
-            {
-                //First run, no branches yet.
-                staged.Add(Direction.Right, []);
-                staged.Add(Direction.Down, []);
-                staged.Add(Direction.Left, []);
-                staged.Add(Direction.Up, []);
-                branch = (Direction)Enum.ToObject(typeof(Direction), Random.Shared.Next(1, 4));
+                staged.Add(branch, new List<int>());
             }
             if (staged[branch].Count == 0)
             {
                 //The requested branch is currently empty, so...
-                if (domsRemain)
+                if (!domsRemain) return null; //...give up
+                //...or load another set:
+                var regularDomains = domains.Where(x => !sequentialDomains.Contains(x.Key));
+                bool holdSequences = !sequencesAllowed && regularDomains.Any(); 
+                var set = holdSequences ? regularDomains.Random() : domains.Random();
+                if (set.Value == null)
                 {
-                    //...load another set
-                    var set = domains.Random();
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, isSequence={isSequence}, sequencesAllowed={sequencesAllowed}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+                }
+                if (sequencesAllowed && sequentialDomains.Contains(set.Key) && !staged.ContainsKey(path))
+                {
+                    //It's a colony sequence, needs own branch.
+                    staged.Add(path, set.Value);
+                    domains.Remove(set.Key);
+                    branch = path;
+                }
+                else
+                {
                     staged[branch] = set.Value;
                     domains.Remove(set.Key);
                 }
-                else return null; //...give up
             }
-            var selected = staged[branch].Where(x => territories.ContainsKey(x));
-            if (!selected.Any())
+            if (!staged.TryGetValue(branch, out var selected) || selected == null || selected.Count == 0)
             {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: none of the {staged[branch].Count} territories selected for branch {branch} could be found! ");
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: unable to find a valid domain set in the staged collection.");
+                return null;
             }
-            int card = selected.Any(x => territories[x].IsBridge) ? selected.First() : selected.RandomOrDefault(); 
+            else if (selected.Any(x => !territories.ContainsKey(x)))
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Some selected territories don't exist.Attempting to purge them.");
+                selected = selected.Where(x => territories.ContainsKey(x)).ToList();
+                if (selected.Count == 0) return null;
+            }
+            var card = selected.Any(x => territories[x].IsBridge) ? selected.First() : selected.RandomOrDefault();
             staged[branch].Remove(card);
             return territories[card];
+            
         }
 
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
@@ -490,7 +530,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return position;
         }
 
-        private Point AdjustForInsertion(Territory territory, Point displacement, Direction root, Direction dir, SortedSet<cPoint> occupied)
+        private Point AdjustForInsertion(Territory territory, Point displacement, Direction branch, Direction dir, SortedSet<cPoint> occupied)
         {
             var selected = territory.Anchor.Add(displacement);
             var width = territory.Size.X;
@@ -506,22 +546,15 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             Point drift = new Point();
 
             //1. Flush out the slot if covered.
-            var movedSlot = selected;
-            var driftDir = GetDriftDirection(selected);
-            var n = 1;
-            while (occupied.Contains(movedSlot))
-            {
-                movedSlot = MoveIntoDirection(driftDir, movedSlot, n);
-                n++;
-            }
-            if (n > 1)
+            var flush = new Point();
+            if (TryToPushAround(selected, branch, dir, occupied, 0, 0, 10, ref flush))
             {
                 flushed = true;
-                selected = movedSlot;
+                selected = selected.Add(flush);
             }
 
             //2. Calculate relative position
-            var offset = AnchorRelativeToDirection(root, selected, flipX, flipY);
+            var offset = AnchorRelativeToDirection(branch, selected, flipX, flipY);
             string relative = offset.ToTuple().ToString();
 
             //3. Deal with collisions around it
@@ -533,41 +566,14 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 {
                     //This means this slot was boxed in! Last attempt to place it
                     _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.Id}: there wasn't enough space for it! Attempting a forced push...");
-                    bool placed = false;
-                    for (int i = 1; i < 20; i++)
-                    {
-                        bool sucess = false;
-                        Point target = new Point();
-                        Direction chosenDir = new Direction();
-                        Point forced1 = MoveIntoDirection(root, offset, i);
-                        if (!SimpleCollision(occupied, forced1, width, height))
-                        {
-                            sucess = true;
-                            target = forced1;
-                            chosenDir = root;
-                        }
-                        else
-                        {
-                            Point forced2 = MoveIntoDirection(dir, offset, i);
-                            if (!SimpleCollision(occupied, forced2, width, height))
-                            {
-                                sucess = true;
-                                target = forced2;
-                                chosenDir = dir;
-                            }
-                        }
-                        if (sucess) 
-                        {
-                            placed = true;
-                            dodge = target.Subtract(offset);
-                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it {i} tiles {chosenDir}.");
-                            break;
-                        }
-                    }
-                    if (!placed)
+                    if (!TryToPushAround(offset, branch, dir, occupied, width, height, 20, ref dodge))
                     {
                         _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...still couldn't place it over the next 20 tiles! Giving up.");
                         return offset;
+                    }
+                    else
+                    {
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it by {dodge}.");
                     }
                 }
                 // When possible, move to avoid overlaps.
@@ -575,7 +581,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
 
             //4. Drift, if possible, around the center
-            bool canDrift = dir != driftDir;
+            bool canDrift = dir != GetDriftDirection(offset);
             if (canDrift && Drift(offset, out drift))
             {
                 Point driftedPos = offset.Add(drift);
@@ -590,13 +596,49 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
             //logging
             List<string> report = [$"#{territory.Id} inserted @ {result.ToTuple()}, from {slot}{dir}"];
-            if (flushed) report.Add($"uncovered to {movedSlot.ToTuple()}");
+            if (flushed) report.Add($"uncovered by moving {flush.ToTuple()}");
             report.Add($"anchor @ {relative}");
             if (drifted) report.Add($"drifted by {drift.ToTuple()}");
             if (bang) report.Add(collisionReport);
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(" -> ", report) + ".");
 
             return result;
+        }
+
+        private bool TryToPushAround(Point position, Direction primaryDir, Direction secondaryDir, SortedSet<cPoint> occupied, int width, int height, int maxPush, ref Point vector)
+        {
+            bool placed = false;
+            bool singleTile = width <= 1 && height <= 2;
+            for (int i = 1; i < maxPush; i++)
+            {
+                bool sucess = false;
+                Point target = new Point();
+                Direction chosenDir = new Direction();
+                Point forced1 = MoveIntoDirection(primaryDir, position, i);
+                if ((singleTile && !occupied.Contains(forced1)) || !SimpleCollision(occupied, forced1, width, height))
+                {
+                    sucess = true;
+                    target = forced1;
+                    chosenDir = primaryDir;
+                }
+                else
+                {
+                    Point forced2 = MoveIntoDirection(secondaryDir, position, i);
+                    if ((singleTile && !occupied.Contains(forced2)) || !SimpleCollision(occupied, forced2, width, height))
+                    {
+                        sucess = true;
+                        target = forced2;
+                        chosenDir = secondaryDir;
+                    }
+                }
+                if (sucess)
+                {
+                    placed = true;
+                    vector = target.Subtract(position);
+                    break;
+                }
+            }
+            return placed;
         }
 
         private bool Collision(SortedSet<cPoint> occupied, Point position, int width, int height, Direction preferredDir, ref string report, out Point pushVector)
@@ -661,12 +703,12 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
             pushX:
             pushVector = new Point(pushX, 0);
-            report = $"Collisions @ {hexPos.ToTuple()}, will be pushed horizontally, vector {pushVector.ToTuple()}, viableY={viableY}.";
+            report = $"Collisions @ {hexPos.ToTuple()} require a horizontal push of {pushVector.X}.";
             return true;
 
             pushY:
             pushVector = new Point(0, pushY);
-            report = $"Collisions @ {hexPos.ToTuple()}, will be pushed vertically, vector {pushVector.ToTuple()}, viableY={viableX}";
+            report = $"Collisions @ {hexPos.ToTuple()} require a vertical push of {pushVector.Y}.";
             return true;
         }
 
@@ -774,69 +816,69 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
         }
 
-        private List<(Point pos, Direction rootDir, Direction dir, int parent)> NextSlotsHelix(Point lastSlot, Territory territory, Direction rootDir, SortedSet<cPoint> occupied)
+        private List<(Point position, ulong address, int generation)> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, ulong parentAddress, int parentGeneration)
         {
-            bool setRoot = rootDir == Direction.Undefined ? true : false;
-            bool firstRun = rootDir == Direction.Undefined;
-            bool quadrant = rootDir != helixLastDir;
-            bool cycle = quadrant && rootDir == Direction.Right;
+            var branch = parentAddress.GetMainBranch(parentGeneration);
+            bool firstRun = branch == Direction.Undefined;
+            bool quadrant = branch != helixLastBranch;
+            bool cycle = quadrant && branch == Direction.Right;
             var ax = territory.Anchor.X;
             var ay = territory.Anchor.Y;
             var width = territory.Size.X;
             var height = territory.HeightToFit;
-            var slots = new List<(Point pos, Direction root, Direction dir, int parent)>();
+            var slots = new List<(Point pos, ulong add, int gen)>();
             var max = occupied.Max();
             var min = occupied.Min();
+            if (cycle) helixGeneration++;
 
             //logging
-            if (cycle && !firstRun) helixGeneration++;
             List<string> log = new List<string>();
             string level = MethodBase.GetCurrentMethod().Name;
 
             //finishing routine
-            void Select(Point slot, Direction root, Direction dir)
+            void Select(Point slot, Direction dir)
             {
                 bool front = slot.X > max.X || slot.X < min.X || slot.Y > max.Y || slot.Y < min.Y;
                 if (front || !occupied.Contains(slot))
                 {
-                    slots.Add((slot, root, dir, territory.Id));
+                    slots.Add((slot, parentAddress.DownstreamAddress(dir), helixGeneration));
                     log.Add($"{slot.ToTuple().ToString()}{dir}");
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {root})");
+                    _ = Toolbox.LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {branch})");
                 }
             }
 
             //Place future slots, in clockwise order
-            if (rootDir == Direction.Right || firstRun)
+            if (branch == Direction.Right || firstRun)
             {
-                if (quadrant) Select(new Point(ax + width + gap, ay), setRoot ? Direction.Right : rootDir, Direction.Right);
-                if (!firstRun) Select(new Point(ax, ay - height - VertGap), rootDir, Direction.Down);
+                if (quadrant) Select(new Point(ax + width + gap, ay), Direction.Right);
+                if (!firstRun) Select(new Point(ax, ay - height - VertGap), Direction.Down);
             }
-            if (rootDir == Direction.Down || firstRun)
+            if (branch == Direction.Down || firstRun)
             {
-                if (quadrant) Select(new Point(ax + width - 1, ay - height - VertGap), setRoot ? Direction.Down : rootDir, Direction.Down);
-                if (!firstRun) Select(new Point(ax - 1 - gap, ay), rootDir, Direction.Left);
+                if (quadrant) Select(new Point(ax + width - 1, ay - height - VertGap), Direction.Down);
+                if (!firstRun) Select(new Point(ax - 1 - gap, ay), Direction.Left);
             }
-            if (rootDir == Direction.Left || firstRun)
+            if (branch == Direction.Left || firstRun)
             {
-                if (quadrant) Select(new Point(ax - 1 - gap, ay - height + 2), setRoot ? Direction.Left : rootDir, Direction.Left);
-                if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + VertGap), rootDir, Direction.Up);
+                if (quadrant) Select(new Point(ax - 1 - gap, ay - height + 2), Direction.Left);
+                if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + VertGap), Direction.Up);
             }
-            if (rootDir == Direction.Up || firstRun)
+            if (branch == Direction.Up || firstRun)
             {
-                if (quadrant) Select(new Point(ax, ay + 2 + VertGap), setRoot ? Direction.Up : rootDir, Direction.Up);
-                if (!firstRun) Select(new Point(ax + width + gap, ay - height + 2), rootDir, Direction.Right);
+                if (quadrant) Select(new Point(ax, ay + 2 + VertGap), Direction.Up);
+                if (!firstRun) Select(new Point(ax + width + gap, ay - height + 2), Direction.Right);
             }
             if (slots.Count() == 0)
             {
-                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.Id}! Branch: {rootDir})");
+                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.Id}! Branch: {branch})");
             }
-            _ = Toolbox.LogAsync(level, $"Slots around #{territory.Id}: {string.Join(", ", log)} (branch: {rootDir}, gen: {helixGeneration}).");
+            _ = Toolbox.LogAsync(level, $"Slots around #{territory.Id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
 
             //House keeping
-            helixLastDir = rootDir;
+            helixLastBranch = branch;
 
             return slots.ToList();
         }
@@ -863,5 +905,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
             }
         }
+
     }
 }
+
+    

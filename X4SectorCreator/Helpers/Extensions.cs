@@ -341,64 +341,6 @@ namespace X4SectorCreator.Helpers
             return new Point(p1.X - p2.X, p1.Y - p2.Y);
         }
 
-        // Easier conversion from point to tuple
-        public static (int, int) ToTuple(this Point p)
-        {
-            return (p.X, p.Y);
-        }
-
-        // Snapping functionality so we don't have to worry about the weird coord system.
-        public static Point FitToHex(this Point target)
-        {
-            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
-            {
-                target.Y += 1;
-            }
-            return target;
-        }
-
-        public static Point FitToHex(this Point target, Direction bias = Direction.Up, bool supressLog = false)
-        {
-            var original = target;
-            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
-            {
-                switch (bias)
-                {
-                    case Direction.Undefined:
-                    case Direction.Up:
-                        target.Y += 1;
-                        break;
-                    case Direction.Down:
-                        target.Y -= 1;
-                        break;
-                    case Direction.Right:
-                        target.X += 1;
-                        break;
-                    case Direction.Left:
-                        target.X -= 1;
-                        break;
-                }
-            }
-            if (!supressLog && (original != target)) File.AppendAllTextAsync("test.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [FitToHex] Moved {original.ToTuple()} {bias} to {target.ToTuple()}{Environment.NewLine}");
-            return target;
-        }
-
-        public static Point WiggleToFit(this Point target, SortedSet<cPoint> occupied)
-        {
-            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
-            {
-                var pos = new Point(target.X, target.Y + 1);
-                if (occupied.Contains(pos))
-                {
-                    pos = new Point(target.X, target.Y - 1);
-                    if (occupied.Contains(pos)) goto Fail;
-                }
-                return pos;
-            }
-            Fail:
-            return target;
-        }
-
         public static double GetDirectionAngleCompassStyle(this Point a, Point b)
         {
             int dx = b.X - a.X;
@@ -494,6 +436,64 @@ namespace X4SectorCreator.Helpers
 
         public static T Pick<T>(this T[] array, Random random) => array[random.Next(array.Length)];
 
+        #region Shuffler
+
+        // Easier conversion from point to tuple
+        public static (int, int) ToTuple(this Point p)
+        {
+            return (p.X, p.Y);
+        }
+
+        // Snapping functionality so we don't have to worry about the weird coord system.
+        public static Point FitToHex(this Point target)
+        {
+            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
+            {
+                target.Y += 1;
+            }
+            return target;
+        }
+        public static Point FitToHex(this Point target, Direction bias = Direction.Up, bool supressLog = false)
+        {
+            var original = target;
+            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
+            {
+                switch (bias)
+                {
+                    case Direction.Undefined:
+                    case Direction.Up:
+                        target.Y += 1;
+                        break;
+                    case Direction.Down:
+                        target.Y -= 1;
+                        break;
+                    case Direction.Right:
+                        target.X += 1;
+                        break;
+                    case Direction.Left:
+                        target.X -= 1;
+                        break;
+                }
+            }
+            if (!supressLog && (original != target)) File.AppendAllTextAsync("test.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [FitToHex] Moved {original.ToTuple()} {bias} to {target.ToTuple()}{Environment.NewLine}");
+            return target;
+        }
+        public static Point WiggleToFit(this Point target, SortedSet<cPoint> occupied)
+        {
+            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
+            {
+                var pos = new Point(target.X, target.Y + 1);
+                if (occupied.Contains(pos))
+                {
+                    pos = new Point(target.X, target.Y - 1);
+                    if (occupied.Contains(pos)) goto Fail;
+                }
+                return pos;
+            }
+            Fail:
+            return target;
+        }
+
         //Reverse Dictionary lookup
         public static IEnumerable<TKey> ReverseLookup<TKey, TValue>(this IDictionary<TKey, TValue> source, TValue sample)
         {
@@ -507,7 +507,7 @@ namespace X4SectorCreator.Helpers
             return KeyValuePair.Create(tuple.Key, tuple.Value);
         }
 
-        //Easier way to add to lists safely
+        //Easier way to add to lists safely:
         public static void AddUnique<T>(this List<T> list, T obj)
         {
             if (!list.Contains(obj))
@@ -515,7 +515,6 @@ namespace X4SectorCreator.Helpers
                 list.Add(obj);
             }
         }
-
         public static void AddRangeUnique<T>(this List<T> list, List<T> range)
         {
             foreach (var item in range)
@@ -526,7 +525,6 @@ namespace X4SectorCreator.Helpers
                 }
             }
         }
-
         public static void AddRangeUnique<T>(this List<T> list, IEnumerable<T> range)
         {
             foreach (var item in range)
@@ -537,5 +535,50 @@ namespace X4SectorCreator.Helpers
                 }
             }
         }
+
+        //Translation tools to pack and unpack the Direction enum into a ulong to be used as adress on the helix fractal.
+        public static ulong DownstreamAddress(this ulong parent, Direction dir)
+        {
+            if (dir == Direction.Undefined)
+            {
+                throw new ArgumentException("Cannot use an Undefined direction.");
+            }
+
+            // Map direction into 2-bit values
+            uint dirBase4 = (uint)dir - 1;
+
+            // Shift left by 2 bits and combine
+            return (parent << 2) | dirBase4;
+        }
+        public static Direction GetDirection(this ulong path)
+        {
+            //NOTE: Without the depth information, we can't tell if 0000 means right or empty!
+            //if (currentDepth == 0) return Direction.Undefined;
+            // Extract 2 bits, add 1 back to restore original enum value
+            uint dirBase4 = (uint)(path & 3);
+            return (Direction)(dirBase4 + 1);
+        }
+        public static ulong GetParentAddress(this ulong childAddress)
+        {
+            // Shifting right by 2 bits drops the last child's 2-bit direction,
+            // immediately reverting the value back to the parent's address.
+            return childAddress >> 2;
+        }
+        public static Direction GetMainBranch(this ulong address, int depth)
+        {
+            if (depth <= 0) return Direction.Undefined; //that's the root.
+            uint rootBase4 = (uint)address.GetAddressAtDepth(depth, 1) & 3;
+            return (Direction)(rootBase4 + 1); // Restore the original enum offset (+1 mapping)
+        }
+        public static ulong GetAddressAtDepth(this ulong currentAddress, int currentDepth, int targetDepth)
+        {
+            if (targetDepth >= currentDepth) return currentAddress;
+            if (targetDepth <= 0) return 0; // trunk address
+
+            int shiftAmount = (currentDepth - targetDepth) * 2;
+            return currentAddress >> shiftAmount;
+        }
+
+        #endregion
     }
 }
