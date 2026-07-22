@@ -10,6 +10,7 @@ namespace X4SectorCreator.Objects
         internal List<int> closeColonyIds = new List<int>();
         internal List<int> connectedIds = new List<int>();
         internal List<cPoint> contour = new List<cPoint>();
+        internal (double x, double y) Center;
         internal Point Corner = new Point();
         internal List<Sector> Destinations = new List<Sector>();
         internal string Dlc;
@@ -19,6 +20,8 @@ namespace X4SectorCreator.Objects
         internal bool IsBridge = false;
         internal Cluster Seed;
         internal Point Size = new Point();
+        internal Direction EntryDirection;
+        
         private bool overhead = false;
 
         internal Territory(Cluster seed, int lastID)
@@ -126,9 +129,9 @@ namespace X4SectorCreator.Objects
             Anchor = Corner.FitToHex();
             Size = new Point(width, height);
             overhead = Anchor.Y > box[3];
-            //int centerX = width / 2;
-            //int centerY = height / 2;
-            //Center = new Point(centerX,centerY);
+            double centerX = Anchor.X + (Size.X - 1) / 2.0;
+            double centerY = Anchor.Y - (Size.Y - 2) / 2.0;
+            Center = (centerX, centerY);
             SetUpClustersOffsets();
         }
 
@@ -138,6 +141,49 @@ namespace X4SectorCreator.Objects
             {
                 cluster.AnchorOffset = cluster.Position.Subtract(Anchor);
             }
+        }
+
+        internal void SetUpDirection()
+        {
+            Direction exitDir = Direction.Undefined;
+            if (Size.X <= 1 && Size.Y <= 2)
+            {
+                EntryDirection = exitDir;
+                return;
+            }
+            int voteUp = 0;
+            int voteDown = 0;
+            int voteRight = 0;
+            int voteLeft = 0;
+            foreach (var cluster in Frontiers)
+            {
+                if (cluster.Position.X < Center.x) voteLeft++;
+                else if (cluster.Position.X > Center.x) voteRight++;
+                if (cluster.Position.Y > Center.y) voteUp++;
+                else if (cluster.Position.Y < Center.y) voteDown++;
+            }
+            Direction vOption = exitDir;
+            if (Size.Y > 2)
+            {
+                if (voteUp > 0 && voteDown < voteUp) vOption = Direction.Up;
+                if (voteDown > 0 && voteDown > voteUp) vOption = Direction.Down;
+            }
+            Direction hOption = exitDir;
+            if (Size.X > 1)
+            {
+                if (voteRight > 0 && voteRight > voteLeft) hOption = Direction.Right;
+                if (voteLeft > 0 && voteRight < voteLeft) hOption = Direction.Left;
+            }
+            if (vOption == Direction.Undefined) exitDir = hOption;
+            else if (hOption == Direction.Undefined) exitDir = vOption;
+            else
+            {
+                var goV = voteUp + voteDown;
+                var goH = voteLeft + voteRight;
+                if (goV > goH) exitDir = vOption;
+                else exitDir = hOption;
+            }
+            EntryDirection = exitDir.OppositeDir();
         }
 
         internal float SizeToContentRatio()

@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using Microsoft.VisualBasic.Logging;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
@@ -6,15 +7,6 @@ using static X4SectorCreator.Helpers.FractalPath;
 
 namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 {
-    public enum Direction
-    {
-        Undefined = 0,
-        Right = 1,
-        Down = 2,
-        Left = 3,
-        Up = 4,
-    }
-
     internal class Shuffler
     {
         internal const int gap = 1;
@@ -99,10 +91,25 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             FindCloseColonies();
             // Consolidate neighbouring territories with the same owner under merged domains.
             ConsolidateDomains();
+            // Report results so far
+            TerritoriesReport();
             // Shuffle!
             Shuffle();
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
+        }
+
+        private void TerritoriesReport()
+        {
+            var log = new List<string>();
+            foreach (var t in territories.Values)
+            {
+                string annexed = t.annexedIds.Count > 0 ? $"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].Id}-{territories[x].Seed.Name}"))}" : "";
+                string bridge = t.IsBridge ? $"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].Id}-{territories[y].Seed.Name}"))}" : "";
+                string colonies = t.closeColonyIds.Count > 0 ? $"; colonies { string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].Id}-{territories[x].Seed.Name}"))}" : "";
+                log.Add($"\n{t.Id} - {t.Seed.Name}: {t.Clusters.Count} clusters, {t.Frontiers.Count} connecting, entry from {t.EntryDirection}{annexed}{bridge}{colonies}.");
+            }
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
         }
 
         internal static int VertGap => gap * 2;
@@ -142,15 +149,11 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
 
         internal void CarveTerritories(IEnumerable<Cluster> clusters)
         {
-            var log = new List<string>();
             ClusterManager.Group(clusters, SortTerritory, x => GetNeighbors(x), x => DLCMatch(x), x => AreConnected(x));
             foreach (var territory in territories.Values)
             {
                 territory.SetUpBox();
-                log.Add($"\n{territory.Id} - {territory.Seed.Name}, {territory.Clusters.Count} clusters.");
             }
-            //logging
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
         }
 
         internal void ConsolidateDomains()
@@ -216,7 +219,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             count += domains.Count - idx;
 
             // logging
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}\n{count} territories total.");
+            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}\n{count} territories total.");
         }
 
         internal Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
@@ -247,7 +250,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 foreach (var entry in territory.ExitPoints)
                 {
                     var origin = entry.origin;
-                    var gate = entry.gate;
                     var destination = entry.destination;
                     var foundId = destination.AssignedTerritoryId;
                     if (foundId > 0)
@@ -257,8 +259,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                         {
                             territory.annexedIds.AddUnique(foundId);
                             territories[foundId].annexedIds.AddUnique(territory.Id);
-                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{territory.Seed.Name} annexed to #{territories[foundId].Id}-{territories[foundId].Seed.Name}");
-                            // register pair into the class-level domains dictionary
                             var key = domains.Count + 1;
                             domains.Add(key, [territory.Id, foundId]);
                         }
@@ -292,8 +292,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     cluster.BridgeFor.AddRange(bridged);
                     var bridge = territories[cluster.AssignedTerritoryId];
                     bridge.IsBridge = true;
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{bridge.Id}-{bridge.Seed.Name} is a bridge between {string.Join(" & ", grouped.Select(x => ("#" + x.Id, x.Seed.Name)))}");
-                    // register set into the class-level domains dictionary
                     var id = domains.Count + 1;
                     domains.Add(id, bridged.Prepend(bridge.Id).ToList());
                 }
@@ -314,6 +312,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     }
                 }
                 territory.ExitPoints = roads;
+                territory.SetUpDirection();
             }
         }
 
@@ -583,7 +582,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             else if (!flushed)
             {
                 //Look for a gap against the parent and move to close it, as needed.
-                if (TryToPushAround(offset, OppositeDir(dir), Direction.Undefined, occupied, width, height, 5, ref adjust))
+                if (TryToPushAround(offset, dir.OppositeDir(), Direction.Undefined, occupied, width, height, 5, ref adjust))
                 {
                     offset = offset.Add(adjust);
                     attracted = true;
@@ -876,12 +875,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             helixLastBranch = branch;
 
             return slots.ToList();
-        }
-
-        private Direction OppositeDir(Direction given)
-        {
-            if (given == Direction.Undefined) return given;
-            return (Direction)(((int)given + 2) % 4);
         }
 
         private List<Point> ScanForCollisions(SortedSet<cPoint> occupied, Point position, int width, int height)

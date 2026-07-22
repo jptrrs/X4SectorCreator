@@ -535,6 +535,13 @@ namespace X4SectorCreator.Helpers
             }
         }
 
+        //For the Direction enum
+        public static Direction OppositeDir(this Direction given)
+        {
+            if (given == Direction.Undefined) return given;
+            return (Direction)(((int)given + 2) % 4);
+        }
+
         #endregion
     }
 }

@@ -8,6 +8,14 @@ using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
 namespace X4SectorCreator.Helpers
 {
     using System;
+    public enum Direction
+    {
+        Undefined = 0,
+        Right = 1,
+        Down = 2,
+        Left = 3,
+        Up = 4,
+    }
 
     internal static class FractalPath
     {
