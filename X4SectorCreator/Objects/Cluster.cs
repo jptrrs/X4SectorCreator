@@ -33,7 +33,8 @@ namespace X4SectorCreator.Objects
         internal Point AnchorOffset = new Point();
 
         [JsonIgnore]
-        public int AssignedTerritoryId {
+        public int AssignedTerritoryId
+        {
             get
             {
                 return assignedTerritoryId;
@@ -52,7 +53,7 @@ namespace X4SectorCreator.Objects
         }
 
         private int assignedTerritoryId = -1;
-        
+
         [JsonIgnore]
         public Hexagon Hexagon { get; set; }
 
@@ -110,7 +111,7 @@ namespace X4SectorCreator.Objects
                 .Where(a => a.Length == sectorCount)
                 .ToArray();
 
-            SectorPlacement[] combination = randomize ? 
+            SectorPlacement[] combination = randomize ?
                 combinations.Random(random) : combinations.First();
 
             for (int i = 0; i < sectorCount; i++)

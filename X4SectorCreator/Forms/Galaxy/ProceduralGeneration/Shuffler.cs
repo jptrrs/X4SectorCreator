@@ -18,12 +18,11 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
     internal class Shuffler
     {
         internal const int gap = 1;
+        internal Dictionary<int, List<int>> domains = [];
         internal List<Cluster> misplaced = [];
         internal Point occupiedMax;
-        internal Dictionary<int, Territory> territories = [];
-        internal Dictionary<int, List<int>> domains = [];
         internal HashSet<int> sequencialDomains = [];
-        private Dictionary<string, List<int>> staged = [];
+        internal Dictionary<int, Territory> territories = [];
 
         private static readonly (int dx, int dy)[] NeighborOffsets =
         [
@@ -36,7 +35,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         ];
 
         private static (int cols, int rows) hexGridFrame;
-
         private static int squareBoundary = -1;
 
         private readonly Func<(Cluster, Cluster), bool> AreConnected = (pair) =>
@@ -83,6 +81,8 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return absX < SquareBoundary && absY < SquareBoundary;
         };
 
+        private Dictionary<string, List<int>> staged = [];
+
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
             // Gather some basic info
@@ -93,9 +93,9 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             CarveTerritories(clusters);
             // Map connections for all clusters and register entry points for territories
             FindConnections();
-            // Determine if there are neighboring territories owned by the same faction TO-DO: exclude the Xenon! 
+            // Determine if there are neighboring territories owned by the same faction TO-DO: exclude the Xenon!
             FindAnnexed();
-            // Determine if there are other close territories owned by the same faction and separated by only a neutral sector. TO-DO: exclude the Xenon! 
+            // Determine if there are other close territories owned by the same faction and separated by only a neutral sector. TO-DO: exclude the Xenon!
             FindCloseColonies();
             // Consolidate neighbouring territories with the same owner under merged domains.
             ConsolidateDomains();
@@ -151,34 +151,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
             //logging
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
-        }
-
-        internal void FindAnnexed()
-        {
-            foreach (var territory in territories.Values)
-            {
-                if (territory.ExitPoints?.Count == 0) continue;
-                foreach (var entry in territory.ExitPoints)
-                {
-                    var origin = entry.origin;
-                    var gate = entry.gate;
-                    var destination = entry.destination;
-                    var foundId = destination.AssignedTerritoryId;
-                    if (foundId > 0)
-                    {
-                        if (territory.annexedIds.Contains(foundId)) continue;
-                        if (origin.Owner != null && !origin.IsNeutral && origin.Owner.Equals(destination.Owner, StringComparison.Ordinal))
-                        {
-                            territory.annexedIds.AddUnique(foundId);
-                            territories[foundId].annexedIds.AddUnique(territory.Id);
-                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{territory.Seed.Name} annexed to #{territories[foundId].Id}-{territories[foundId].Seed.Name}");
-                            // register pair into the class-level domains dictionary
-                            var key = domains.Count + 1;
-                            domains.Add(key, [territory.Id, foundId]);
-                        }
-                    }
-                }
-            }
         }
 
         internal void ConsolidateDomains()
@@ -267,6 +239,34 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return set;
         }
 
+        internal void FindAnnexed()
+        {
+            foreach (var territory in territories.Values)
+            {
+                if (territory.ExitPoints?.Count == 0) continue;
+                foreach (var entry in territory.ExitPoints)
+                {
+                    var origin = entry.origin;
+                    var gate = entry.gate;
+                    var destination = entry.destination;
+                    var foundId = destination.AssignedTerritoryId;
+                    if (foundId > 0)
+                    {
+                        if (territory.annexedIds.Contains(foundId)) continue;
+                        if (origin.Owner != null && !origin.IsNeutral && origin.Owner.Equals(destination.Owner, StringComparison.Ordinal))
+                        {
+                            territory.annexedIds.AddUnique(foundId);
+                            territories[foundId].annexedIds.AddUnique(territory.Id);
+                            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{territory.Seed.Name} annexed to #{territories[foundId].Id}-{territories[foundId].Seed.Name}");
+                            // register pair into the class-level domains dictionary
+                            var key = domains.Count + 1;
+                            domains.Add(key, [territory.Id, foundId]);
+                        }
+                    }
+                }
+            }
+        }
+
         internal void FindCloseColonies()
         {
             var candidates = territories.Values
@@ -315,6 +315,80 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
                 territory.ExitPoints = roads;
             }
+        }
+
+        internal Territory PickNextFromStaged(string path, bool sequencesAllowed)
+        {
+            bool domsRemain = domains.Count > 0;
+            bool stagedRemain = staged.Count > 0;
+            //Bail out if something hasn't been intialized or the lists have been exausted.
+            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0)) return null;
+            bool isSequence = HasAncestorStaged(path, out string ancestor);
+            var branch = isSequence ? ancestor : path.GetAddressAtDepth(1); //selects either the root branch or the divergence point for a sequence
+            if (branch == "0" || branch == "") branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
+            if (!isSequence && !staged.ContainsKey(branch))
+            {
+                staged.Add(branch, new List<int>());
+            }
+            //else if (isSequence)
+            //{
+            //    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Territory belongs to a sequencial domain, looking for branch {branch}");
+            //}
+            if (staged[branch].Count == 0)
+            {
+                //The requested branch is currently empty, so...
+                if (!domsRemain)
+                {
+                    //The queue is empty!
+                    //Cross out that branch (it will be re-added automatically later if needed)
+                    staged.Remove(branch);
+                    //Check and report fail state:
+                    if (stagedRemain)
+                    {
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"We've run out of domains before all staged were distributed. Requested branch was {branch}. Staged: {string.Join("; ", staged.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+                    }
+                    else
+                    {
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: both domains lists were exhausted, yet another territory was requested anyway! Requested branch was {branch}.");
+                    }
+                    return null; //...give up
+                }
+                //Load another set:
+                var regularDomains = domains.Where(x => !sequencialDomains.Contains(x.Key));
+                bool holdSequences = !sequencesAllowed && regularDomains.Any();
+                var set = holdSequences ? regularDomains.Random() : domains.Random();
+                if (set.Value == null)
+                {
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, isSequence={isSequence}, sequencesAllowed={sequencesAllowed}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+                }
+                if (sequencesAllowed && sequencialDomains.Contains(set.Key) && !staged.ContainsKey(path))
+                {
+                    //It's a colony sequence, needs own branch.
+                    staged.Add(path, set.Value);
+                    domains.Remove(set.Key);
+                    branch = path;
+                }
+                else
+                {
+                    //New set replaces the depleted one.
+                    staged[branch] = set.Value;
+                    domains.Remove(set.Key);
+                }
+            }
+            if (!staged.TryGetValue(branch, out var selected) || selected == null || selected.Count == 0)
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: unable to find a valid domain set in the staged collection.");
+                return null;
+            }
+            else if (selected.Any(x => !territories.ContainsKey(x)))
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Some selected territories don't exist.Attempting to purge them.");
+                selected = selected.Where(x => territories.ContainsKey(x)).ToList();
+                if (selected.Count == 0) return null;
+            }
+            var card = selected.Any(x => territories[x].IsBridge) ? selected.First() : selected.RandomOrDefault();
+            staged[branch].Remove(card);
+            return territories[card];
         }
 
         internal void Shuffle()
@@ -404,99 +478,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             HandleMisplaced();
         }
 
-        private bool HasAncestorStaged(string path, out string found)
-        {
-            var generation = path.Length;
-            if (generation <= 2) goto fail; //that would just return the trunk or main branch, in which case regular beahviour will do.
-            bool flag = false;
-            for (var i = generation - 1; i > 1; i--)
-            {
-                var tested = path.GetAddressAtDepth(i);
-                if (staged.ContainsKey(tested))
-                {
-                    found = tested;
-                    return true;
-                }
-            }
-            fail:
-            found = path;
-            return false;
-        }
-
-        internal Territory PickNextFromStaged(string path, bool sequencesAllowed)
-        {
-            bool domsRemain = domains.Count > 0;
-            bool stagedRemain = staged.Count > 0;
-            //Bail out if something hasn't been intialized or the lists have been exausted.
-            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0)) return null;
-            bool isSequence = HasAncestorStaged(path, out string ancestor);
-            var branch = isSequence ? ancestor : path.GetAddressAtDepth(1); //selects either the root branch or the divergence point for a sequence
-            if (branch == "0" || branch == "") branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
-            if (!isSequence && !staged.ContainsKey(branch))
-            {
-                staged.Add(branch, new List<int>());
-            }
-            //else if (isSequence)
-            //{
-            //    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Territory belongs to a sequencial domain, looking for branch {branch}");
-            //}
-            if (staged[branch].Count == 0)
-            {
-                //The requested branch is currently empty, so...
-                if (!domsRemain)
-                {
-                    //The queue is empty!
-                    //Cross out that branch (it will be re-added automatically later if needed)
-                    staged.Remove(branch);
-                    //Check and report fail state:
-                    if (stagedRemain)
-                    {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"We've run out of domains before all staged were distributed. Requested branch was {branch}. Staged: {string.Join("; ", staged.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
-                    }
-                    else
-                    {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: both domains lists were exhausted, yet another territory was requested anyway! Requested branch was {branch}.");
-                    }
-                    return null; //...give up
-                }
-                //Load another set:
-                var regularDomains = domains.Where(x => !sequencialDomains.Contains(x.Key));
-                bool holdSequences = !sequencesAllowed && regularDomains.Any();
-                var set = holdSequences ? regularDomains.Random() : domains.Random();
-                if (set.Value == null)
-                {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, isSequence={isSequence}, sequencesAllowed={sequencesAllowed}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
-                }
-                if (sequencesAllowed && sequencialDomains.Contains(set.Key) && !staged.ContainsKey(path))
-                {
-                    //It's a colony sequence, needs own branch.
-                    staged.Add(path, set.Value);
-                    domains.Remove(set.Key);
-                    branch = path;
-                }
-                else
-                {
-                    //New set replaces the depleted one.
-                    staged[branch] = set.Value;
-                    domains.Remove(set.Key);
-                }
-            }
-            if (!staged.TryGetValue(branch, out var selected) || selected == null || selected.Count == 0)
-            {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: unable to find a valid domain set in the staged collection.");
-                return null;
-            }
-            else if (selected.Any(x => !territories.ContainsKey(x)))
-            {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Some selected territories don't exist.Attempting to purge them.");
-                selected = selected.Where(x => territories.ContainsKey(x)).ToList();
-                if (selected.Count == 0) return null;
-            }
-            var card = selected.Any(x => territories[x].IsBridge) ? selected.First() : selected.RandomOrDefault();
-            staged[branch].Remove(card);
-            return territories[card];
-        }
-
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
         {
             Point result = new Point();
@@ -566,7 +547,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             //1. Flush out the slot if covered.
             var driftDirection = GetDriftDirection(selected);
             var flush = new Point();
-            if (occupied.Contains(selected) && TryToPushAround(selected, dir, driftDirection,  occupied, 0, 0, 10, ref flush))
+            if (occupied.Contains(selected) && TryToPushAround(selected, dir, driftDirection, occupied, 0, 0, 10, ref flush))
             {
                 flushed = true;
                 selected = selected.Add(flush);
@@ -633,49 +614,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(" -> ", report) + ".");
 
             return result;
-        }
-
-        private Direction OppositeDir(Direction given)
-        {
-            if (given == Direction.Undefined) return given;
-            return (Direction)(((int)given + 2) % 4);
-        }
-
-        private bool TryToPushAround(Point position, Direction primaryDir, Direction secondaryDir, SortedSet<cPoint> occupied, int width, int height, int maxPush, ref Point vector)
-        {
-            if (primaryDir == Direction.Undefined) return false;
-            bool placed = false;
-            bool singleTile = width <= 1 && height <= 2;
-            for (int i = 1; i < maxPush; i++)
-            {
-                bool sucess = false;
-                Point target = new Point();
-                Direction chosenDir = new Direction();
-                Point forced1 = MoveIntoDirection(primaryDir, position, i);
-                if ((singleTile && !occupied.Contains(forced1)) || !SimpleCollision(occupied, forced1, width, height))
-                {
-                    sucess = true;
-                    target = forced1;
-                    chosenDir = primaryDir;
-                }
-                else if (secondaryDir != Direction.Undefined)
-                {
-                    Point forced2 = MoveIntoDirection(secondaryDir, position, i);
-                    if ((singleTile && !occupied.Contains(forced2)) || !SimpleCollision(occupied, forced2, width, height))
-                    {
-                        sucess = true;
-                        target = forced2;
-                        chosenDir = secondaryDir;
-                    }
-                }
-                if (sucess)
-                {
-                    placed = true;
-                    vector = target.Subtract(position);
-                    break;
-                }
-            }
-            return placed;
         }
 
         private bool Collision(SortedSet<cPoint> occupied, Point position, int width, int height, Direction preferredDir, ref string report, out Point pushVector)
@@ -853,6 +791,25 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             }
         }
 
+        private bool HasAncestorStaged(string path, out string found)
+        {
+            var generation = path.Length;
+            if (generation <= 2) goto fail; //that would just return the trunk or main branch, in which case regular beahviour will do.
+            bool flag = false;
+            for (var i = generation - 1; i > 1; i--)
+            {
+                var tested = path.GetAddressAtDepth(i);
+                if (staged.ContainsKey(tested))
+                {
+                    found = tested;
+                    return true;
+                }
+            }
+            fail:
+            found = path;
+            return false;
+        }
+
         private List<(Point position, string address)> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, string parentAddress)
         {
             var branch = parentAddress.GetMainBranch();
@@ -921,6 +878,12 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return slots.ToList();
         }
 
+        private Direction OppositeDir(Direction given)
+        {
+            if (given == Direction.Undefined) return given;
+            return (Direction)(((int)given + 2) % 4);
+        }
+
         private List<Point> ScanForCollisions(SortedSet<cPoint> occupied, Point position, int width, int height)
         {
             return Toolbox.Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)).ToList();
@@ -930,6 +893,43 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         {
             var hexPos = position.FitToHex(); //not fitting could result in undetected collisions
             return ScanForCollisions(occupied, hexPos, width, height).Any();
+        }
+
+        private bool TryToPushAround(Point position, Direction primaryDir, Direction secondaryDir, SortedSet<cPoint> occupied, int width, int height, int maxPush, ref Point vector)
+        {
+            if (primaryDir == Direction.Undefined) return false;
+            bool placed = false;
+            bool singleTile = width <= 1 && height <= 2;
+            for (int i = 1; i < maxPush; i++)
+            {
+                bool sucess = false;
+                Point target = new Point();
+                Direction chosenDir = new Direction();
+                Point forced1 = MoveIntoDirection(primaryDir, position, i);
+                if ((singleTile && !occupied.Contains(forced1)) || !SimpleCollision(occupied, forced1, width, height))
+                {
+                    sucess = true;
+                    target = forced1;
+                    chosenDir = primaryDir;
+                }
+                else if (secondaryDir != Direction.Undefined)
+                {
+                    Point forced2 = MoveIntoDirection(secondaryDir, position, i);
+                    if ((singleTile && !occupied.Contains(forced2)) || !SimpleCollision(occupied, forced2, width, height))
+                    {
+                        sucess = true;
+                        target = forced2;
+                        chosenDir = secondaryDir;
+                    }
+                }
+                if (sucess)
+                {
+                    placed = true;
+                    vector = target.Subtract(position);
+                    break;
+                }
+            }
+            return placed;
         }
 
         private void UpdateClusterMap(List<Cluster> clusters, int errorY = 0)
@@ -943,8 +943,5 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 }
             }
         }
-
     }
 }
-
-    
