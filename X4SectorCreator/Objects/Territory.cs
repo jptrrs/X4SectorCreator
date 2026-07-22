@@ -1,4 +1,5 @@
-﻿using X4SectorCreator.Helpers;
+﻿using X4SectorCreator.Forms.Galaxy.Shuffler;
+using X4SectorCreator.Helpers;
 
 namespace X4SectorCreator.Objects
 {
@@ -95,6 +96,7 @@ namespace X4SectorCreator.Objects
                         Exits.Add(sector, new List<(Gate, Sector)> { (gate, dest) });
                     }
                 }
+                SetUpDirection();
             }
         }
 
@@ -145,6 +147,7 @@ namespace X4SectorCreator.Objects
 
         internal void SetUpDirection()
         {
+            if (Size.IsEmpty) SetUpBox();
             Direction exitDir = Direction.Undefined;
             if (Size.X <= 1 && Size.Y <= 2)
             {

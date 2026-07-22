@@ -1,13 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
-
-namespace X4SectorCreator.Helpers
+﻿namespace X4SectorCreator.Forms.Galaxy.Shuffler
 {
     using System;
+
     public enum Direction
     {
         Undefined = 0,
@@ -17,6 +11,7 @@ namespace X4SectorCreator.Helpers
         Up = 4,
     }
 
+    //This is just a bunch of specialized extensions.
     internal static class FractalPath
     {
         public static string DownstreamAddress(this string path, Direction dir)
@@ -53,5 +48,12 @@ namespace X4SectorCreator.Helpers
             int firstDigit = path[0] - '0'; //this subtraction is a hack to quickly convert a numeric char into an actual int.
             return (Direction)firstDigit;
         }
+
+        public static Direction OppositeDir(this Direction given)
+        {
+            if (given == Direction.Undefined) return given;
+            return (Direction)(((int)given + 2) % 4);
+        }
+
     }
 }

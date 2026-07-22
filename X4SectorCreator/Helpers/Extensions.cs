@@ -5,6 +5,7 @@ using System.Text;
 using X4SectorCreator.Configuration;
 using X4SectorCreator.CustomComponents;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
+using X4SectorCreator.Forms.Galaxy.Shuffler;
 using X4SectorCreator.Objects;
 
 namespace X4SectorCreator.Helpers
@@ -533,13 +534,6 @@ namespace X4SectorCreator.Helpers
                     list.Add(item);
                 }
             }
-        }
-
-        //For the Direction enum
-        public static Direction OppositeDir(this Direction given)
-        {
-            if (given == Direction.Undefined) return given;
-            return (Direction)(((int)given + 2) % 4);
         }
 
         #endregion

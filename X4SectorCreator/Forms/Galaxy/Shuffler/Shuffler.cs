@@ -3,9 +3,9 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
-using static X4SectorCreator.Helpers.FractalPath;
+using static X4SectorCreator.Forms.Galaxy.Shuffler.FractalPath;
 
-namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
+namespace X4SectorCreator.Forms.Galaxy.Shuffler
 {
     internal class Shuffler
     {
@@ -133,7 +133,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
             return cluster.Dlc == territories.Last().Value.Dlc;
         };
 
-        private Action<Cluster, bool> SortTerritory => (Cluster cluster, bool reset) =>
+        private Action<Cluster, bool> SortTerritory => (cluster, reset) =>
         {
             if (reset)
             {
@@ -312,7 +312,6 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                     }
                 }
                 territory.ExitPoints = roads;
-                territory.SetUpDirection();
             }
         }
 
@@ -723,19 +722,19 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
         private Direction GetDriftDirection(Point pos)
         {
             //Direction is based on position, 45 degrees quadrants.
-            if ((InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X) || (pos.X < SquareBoundary && pos.Y > SquareBoundary)) //Above: move right then down
+            if (InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X || pos.X < SquareBoundary && pos.Y > SquareBoundary) //Above: move right then down
             {
                 return Direction.Right;
             }
-            else if ((InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X) || (pos.X > -SquareBoundary && pos.Y < -SquareBoundary)) //Below: move left then up
+            else if (InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X || pos.X > -SquareBoundary && pos.Y < -SquareBoundary) //Below: move left then up
             {
                 return Direction.Left;
             }
-            else if ((InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y) || (pos.X > SquareBoundary && pos.Y > -SquareBoundary)) //Right: move down then left
+            else if (InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y || pos.X > SquareBoundary && pos.Y > -SquareBoundary) //Right: move down then left
             {
                 return Direction.Down;
             }
-            else if ((InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y) || (pos.X < -SquareBoundary && pos.Y < SquareBoundary)) //Left: move up then right
+            else if (InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y || pos.X < -SquareBoundary && pos.Y < SquareBoundary) //Left: move up then right
             {
                 return Direction.Up;
             }
@@ -899,7 +898,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 Point target = new Point();
                 Direction chosenDir = new Direction();
                 Point forced1 = MoveIntoDirection(primaryDir, position, i);
-                if ((singleTile && !occupied.Contains(forced1)) || !SimpleCollision(occupied, forced1, width, height))
+                if (singleTile && !occupied.Contains(forced1) || !SimpleCollision(occupied, forced1, width, height))
                 {
                     sucess = true;
                     target = forced1;
@@ -908,7 +907,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration
                 else if (secondaryDir != Direction.Undefined)
                 {
                     Point forced2 = MoveIntoDirection(secondaryDir, position, i);
-                    if ((singleTile && !occupied.Contains(forced2)) || !SimpleCollision(occupied, forced2, width, height))
+                    if (singleTile && !occupied.Contains(forced2) || !SimpleCollision(occupied, forced2, width, height))
                     {
                         sucess = true;
                         target = forced2;
