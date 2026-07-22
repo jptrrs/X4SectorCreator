@@ -536,49 +536,6 @@ namespace X4SectorCreator.Helpers
             }
         }
 
-        //Translation tools to pack and unpack the Direction enum into a ulong to be used as adress on the helix fractal.
-        public static ulong DownstreamAddress(this ulong parent, Direction dir)
-        {
-            if (dir == Direction.Undefined)
-            {
-                throw new ArgumentException("Cannot use an Undefined direction.");
-            }
-
-            // Map direction into 2-bit values
-            uint dirBase4 = (uint)dir - 1;
-
-            // Shift left by 2 bits and combine
-            return (parent << 2) | dirBase4;
-        }
-        public static Direction GetDirection(this ulong path)
-        {
-            //NOTE: Without the depth information, we can't tell if 0000 means right or empty!
-            //if (currentDepth == 0) return Direction.Undefined;
-            // Extract 2 bits, add 1 back to restore original enum value
-            uint dirBase4 = (uint)(path & 3);
-            return (Direction)(dirBase4 + 1);
-        }
-        public static ulong GetParentAddress(this ulong childAddress)
-        {
-            // Shifting right by 2 bits drops the last child's 2-bit direction,
-            // immediately reverting the value back to the parent's address.
-            return childAddress >> 2;
-        }
-        public static Direction GetMainBranch(this ulong address, int depth)
-        {
-            if (depth <= 0) return Direction.Undefined; //that's the root.
-            uint rootBase4 = (uint)address.GetAddressAtDepth(depth, 1) & 3;
-            return (Direction)(rootBase4 + 1); // Restore the original enum offset (+1 mapping)
-        }
-        public static ulong GetAddressAtDepth(this ulong currentAddress, int currentDepth, int targetDepth)
-        {
-            if (targetDepth >= currentDepth) return currentAddress;
-            if (targetDepth <= 0) return 0; // trunk address
-
-            int shiftAmount = (currentDepth - targetDepth) * 2;
-            return currentAddress >> shiftAmount;
-        }
-
         #endregion
     }
 }
