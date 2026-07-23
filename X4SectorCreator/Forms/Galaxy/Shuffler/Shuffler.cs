@@ -11,10 +11,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         internal Dictionary<int, List<int>> domains = [];
         internal List<Cluster> misplaced = [];
         internal Point occupiedMax;
-        internal HashSet<int> sequencialDomains = [];
+        internal HashSet<int> sequentialDomains = [];
         internal Dictionary<int, Territory> territories = [];
 
-        private static readonly (int dx, int dy)[] NeighborOffsets =
+        private static readonly (int x, int y)[] NeighborOffsets =
         [
             (0,  2),
             (0, -2),
@@ -41,17 +41,23 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return flag;
         };
 
-        private readonly Func<Cluster, List<Point>> GetNeighbors = cluster =>
+        private readonly Func<Cluster, HashSet<Cluster>, IEnumerable<Cluster>> GetNeighbors = (location, crowd) =>
         {
-            var pos = cluster.Position;
-            return NeighborOffsets
-                .Select(off => new Point(pos.X + off.dx, pos.Y + off.dy))
-                .ToList();
+            var targetPositions = NeighborOffsets
+                .Select(offset => new Point(location.Position.X + offset.x, location.Position.Y + offset.y))
+                .ToHashSet();
+            return crowd.Where(cluster => targetPositions.Contains(cluster.Position));
         };
 
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
         {
             return !territory.Clusters.Contains(cluster);
+        };
+
+        //Spares certain domain sets from spawning in randomized order: close colonies.
+        private readonly Func<Territory, bool> KeepSequence = t =>
+        {
+            return t.IsBridge;
         };
 
         private int helixGeneration = 1;
@@ -146,7 +152,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         internal void CarveTerritories(IEnumerable<Cluster> clusters)
         {
-            ClusterManager.Group(clusters, SortTerritory, x => GetNeighbors(x), x => DLCMatch(x), x => AreConnected(x));
+            var ordered = clusters.OrderBy(x => x.Position.DistanceSquared(Point.Empty)).ToList();
+            Toolbox.RecursiveProcessing(ordered, SortTerritory, GetNeighbors, x => DLCMatch(x), x => AreConnected(x));
             foreach (var territory in territories.Values)
             {
                 territory.SetUpBox();
@@ -201,10 +208,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 count += g.Count;
                 List<int> reordered = [];
-                if (g.Any(x => territories[x].IsBridge)) //spares close colonies sets.
+                if (g.Any(x => KeepSequence(territories[x])))
                 {
                     reordered = g.ToList();
-                    sequencialDomains.Add(idx); //note that down for later.
+                    sequentialDomains.Add(idx); //note that down for later.
                 }
                 else
                 {
@@ -312,13 +319,18 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
-        internal Territory PickNextFromStaged(string path, bool sequencesAllowed)
+        internal Territory PickNextFromStaged(string path, bool sequencesAllowed, out bool isSequence)
         {
             bool domsRemain = domains.Count > 0;
             bool stagedRemain = staged.Count > 0;
+
             //Bail out if something hasn't been intialized or the lists have been exausted.
-            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0)) return null;
-            bool isSequence = HasAncestorStaged(path, out string ancestor);
+            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0))
+            {
+                isSequence = false;
+                return null;
+            }
+            isSequence = HasAncestorStaged(path, out string ancestor);
             var branch = isSequence ? ancestor : path.GetAddressAtDepth(1); //selects either the root branch or the divergence point for a sequence
             if (branch == "0" || branch == "") branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
             if (!isSequence && !staged.ContainsKey(branch))
@@ -345,14 +357,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     return null; //...give up
                 }
                 //Load another set:
-                var regularDomains = domains.Where(x => !sequencialDomains.Contains(x.Key));
+                var regularDomains = domains.Where(x => !sequentialDomains.Contains(x.Key));
                 bool holdSequences = !sequencesAllowed && regularDomains.Any();
                 var set = holdSequences ? regularDomains.Random() : domains.Random();
                 if (set.Value == null)
                 {
                     _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, isSequence={isSequence}, sequencesAllowed={sequencesAllowed}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
                 }
-                if (sequencesAllowed && sequencialDomains.Contains(set.Key) && !staged.ContainsKey(path))
+                if (sequencesAllowed && sequentialDomains.Contains(set.Key) && !staged.ContainsKey(path))
                 {
                     //It's a colony sequence, needs own branch.
                     staged.Add(path, set.Value);
@@ -422,7 +434,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
                 //Select next territory.
                 bool sequencesAllowed = dir == Direction.Undefined || dir == branch;
-                var territory = PickNextFromStaged(slot.add, sequencesAllowed);
+                var territory = PickNextFromStaged(slot.add, sequencesAllowed, out var isSequence);
                 if (territory == null)
                 {
                     if (inBounds) deferred.Enqueue(slot); //recycle slots by throwing them back at the end of the line.
@@ -434,20 +446,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 //Rotate it as needed.
                 if (dir != Direction.Undefined && territory.EntryDirection != Direction.Undefined && territory.EntryDirection != dir)
                 {
-                    string b4anchor = territory.Anchor.ToTuple().ToString();
-                    List<string> b4Rotate = territory.Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
-
                     var turns = territory.EntryDirection.ClockwiseStepsTo(dir);
                     territory.Rotate(turns);
-
-                    List<string> afterRotate = territory.Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
-                    _ = Toolbox.LogAsync(level, $"Rotate DEBUG: rotating {turns*90}° (from {territory.EntryDirection}), anchor {b4anchor} -> {territory.Anchor.ToTuple()}, clusters {string.Join(", ", b4Rotate)} -> {string.Join(", ", afterRotate)}");
                 }
 
                 //Fine-tune the insertion spot so it fits right in.
                 var currentPos = territory.Anchor;
                 var planned = newPos.Subtract(currentPos);
-                if (i > 0) newPos = AdjustForInsertion(territory, planned, branch, dir, occupied);
+                if (i > 0) newPos = AdjustForInsertion(territory, planned, branch, dir, occupied, isSequence);
 
                 //Move the piece
                 var move = newPos.Subtract(currentPos);
@@ -463,17 +469,17 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var cMinY = covered.MinBy(p => p.Y).Y;
                 var cMaxX = covered.MaxBy(p => p.X).X;
                 var cMinX = covered.MinBy(p => p.X).X;
-                _ = Toolbox.LogAsync(level, $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical,totalling {occupied.Count} now...");
+                _ = Toolbox.LogAsync(level, $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical, totalling {occupied.Count} now.");
 
                 //Update the board.
                 UpdateClusterMap(territory.Clusters, i);
 
                 //Prepare the next slots.
                 var nextSlots = NextSlotsHelix(territory, occupied, slot.add);
-                bool isSequencial = sequencialDomains.Contains(territory.AssignedDomainId);
+                bool isSequential = sequentialDomains.Contains(territory.AssignedDomainId);
                 foreach (var (pos, add) in nextSlots)
                 {
-                    if (InBounds(pos) || isSequencial) slots.Enqueue((pos, add));
+                    if (InBounds(pos) || isSequential) slots.Enqueue((pos, add));
                     else deferred.Enqueue((pos, add));
                 }
             }
@@ -530,7 +536,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return position;
         }
 
-        private Point AdjustForInsertion(Territory territory, Point displacement, Direction branch, Direction dir, SortedSet<cPoint> occupied)
+        private Point AdjustForInsertion(Territory territory, Point displacement, Direction branch, Direction dir, SortedSet<cPoint> occupied, bool isSequence)
         {
             var selected = territory.Anchor.Add(displacement);
             var width = territory.Size.X;
@@ -593,8 +599,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
 
             //4. Drift, if possible, around the center
-            bool canDrift = dir != GetDriftDirection(offset);
-            if (canDrift && Drift(offset, out drift))
+            if (!isSequence && dir != GetDriftDirection(offset) && Drift(offset, out drift))
             {
                 Point driftedPos = offset.Add(drift);
                 if (!SimpleCollision(occupied, driftedPos, width, height))

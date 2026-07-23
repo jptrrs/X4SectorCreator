@@ -45,6 +45,9 @@ namespace X4SectorCreator.Objects
         private Point? plannedPosition;
 
         [JsonIgnore]
+        internal cPoint cPosition => (cPoint)Position;
+
+        [JsonIgnore]
         public Point PlannedPosition
         {
             get

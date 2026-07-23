@@ -4,73 +4,6 @@ namespace X4SectorCreator.Helpers
 {
     internal static class ClusterManager
     {
-        internal static void Group(
-            IEnumerable<Cluster> items,
-            Action<Cluster, bool> process,
-            Func<Cluster, List<Point>> selector,
-            Predicate<Cluster> filter = null,
-            Predicate<(Cluster, Cluster)> comparsion = null,
-            IProgress<int> progress = null,
-            CancellationToken cancellationToken = default)
-        {
-            var seed = items.FirstOrDefault();
-            var remaining = new HashSet<Cluster>(items);
-            int total = remaining.Count;
-            if (total <= 0) return;
-            var posIndex = remaining.ToDictionary(c => c.Position);
-
-            int processed = 0;
-
-            void Report()
-            {
-                int percent = Math.Clamp(processed * 100 / total, 0, 100);
-                progress?.Report(percent);
-            }
-
-            void Iterate(Cluster current, bool reset)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (!remaining.Remove(current)) return;
-
-                posIndex.Remove(current.Position);
-
-                process(current, reset);
-                processed++;
-                Report();
-
-                var neighbors = selector(current);
-                if (neighbors == null) return;
-
-                foreach (var pos in neighbors)
-                {
-                    if (posIndex.TryGetValue(pos, out Cluster neighborCluster))
-                    {
-                        bool filterCheck = filter == null || filter(neighborCluster);
-                        bool comparsionCheck = comparsion == null || comparsion((current, neighborCluster));
-                        if (filterCheck && comparsionCheck)
-                        {
-                            Iterate(neighborCluster, false);
-                        }
-                    }
-                }
-            }
-
-            if (remaining.Contains(seed))
-            {
-                Iterate(seed, true);
-            }
-
-            while (remaining.Count > 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var nextSeed = remaining.First();
-                Iterate(nextSeed, true);
-            }
-
-            progress?.Report(100);
-        }
-
         internal static List<(Cluster, Sector, Gate, Sector)> PickDestinations(IEnumerable<Cluster> items, Predicate<Cluster> filter)
         {
             var result = new List<(Cluster, Sector, Gate, Sector)>();
@@ -127,9 +60,9 @@ namespace X4SectorCreator.Helpers
 
             (double rx, double ry) = turns switch
             {
-                1 => (cx - dy/2, cy + 2*dx), // 90° Counter-Clockwise
+                1 => (cx + dy / 2, cy - 2 * dx), // 90° Clockwise
                 2 => (cx - dx, cy - dy), // 180° Rotation (Inversion)
-                3 => (cx + dy/2, cy - 2*dx), // 270° Counter-Clockwise (90° Clockwise)
+                3 => (cx - dy / 2, cy + 2 * dx), // 270° Clockwise
                 0 => (current.X, current.Y), // No rotation
                 _ => throw new ArgumentException("turn parameter should be 1, 2 or 3.")
             };

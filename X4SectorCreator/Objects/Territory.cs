@@ -1,4 +1,5 @@
-﻿using X4SectorCreator.Forms.Galaxy.Shuffler;
+﻿using System.Reflection;
+using X4SectorCreator.Forms.Galaxy.Shuffler;
 using X4SectorCreator.Helpers;
 
 namespace X4SectorCreator.Objects
@@ -202,6 +203,8 @@ namespace X4SectorCreator.Objects
                 c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, Center.x, Center.y, turns);
             }
             SetUpBox();
+            List<string> afterRotate = Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{Id}-{Seed.Name} rotated {turns * 90}° (from {EntryDirection})");
         }
     }
 }
