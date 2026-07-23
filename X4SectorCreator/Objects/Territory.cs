@@ -118,7 +118,7 @@ namespace X4SectorCreator.Objects
 
         internal void SetUpBox()
         {
-            var positions = Clusters.Select(c => c.Position).ToList();
+            var positions = Clusters.Select(c => c.PlannedPosition).ToList();
             var posX = positions.Select(p => p.X).ToList();
             var posY = positions.Select(p => p.Y).ToList();
             box[0] = posX.Max();
@@ -141,7 +141,7 @@ namespace X4SectorCreator.Objects
         {
             foreach (var cluster in Clusters)
             {
-                cluster.AnchorOffset = cluster.Position.Subtract(Anchor);
+                cluster.AnchorOffset = cluster.PlannedPosition.Subtract(Anchor);
             }
         }
 
@@ -193,6 +193,15 @@ namespace X4SectorCreator.Objects
         {
             var area = Size.X * Size.Y;
             return area / Clusters.Count;
+        }
+
+        internal void Rotate(int turns)
+        {
+            foreach (var c in Clusters)
+            {
+                c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, Center.x, Center.y, turns);
+            }
+            SetUpBox();
         }
     }
 }

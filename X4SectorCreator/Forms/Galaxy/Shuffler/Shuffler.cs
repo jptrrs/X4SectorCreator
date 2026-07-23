@@ -1,9 +1,7 @@
-﻿using Microsoft.VisualBasic.Logging;
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
-using static X4SectorCreator.Forms.Galaxy.Shuffler.FractalPath;
 
 namespace X4SectorCreator.Forms.Galaxy.Shuffler
 {
@@ -80,7 +78,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Gather some basic info
             hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
             _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}");
-
             // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
             // Map connections for all clusters and register entry points for territories
@@ -328,10 +325,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 staged.Add(branch, new List<int>());
             }
-            //else if (isSequence)
-            //{
-            //    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Territory belongs to a sequencial domain, looking for branch {branch}");
-            //}
             if (staged[branch].Count == 0)
             {
                 //The requested branch is currently empty, so...
@@ -435,21 +428,32 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     if (inBounds) deferred.Enqueue(slot); //recycle slots by throwing them back at the end of the line.
                     goto Selection;
                 }
-                var currentPos = territory.Anchor;
-
                 _ = Toolbox.LogAsync(level, $"Step {i}, branch {branch}, slot @ {newPos.ToTuple()}/{dir}/{slot.add}", true);
-                _ = Toolbox.LogAsync(level, $"Assigning #{territory.Id} - {territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters");
+                _ = Toolbox.LogAsync(level, $"Assigning #{territory.Id}-{territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters");
+
+                //Rotate it as needed.
+                if (dir != Direction.Undefined && territory.EntryDirection != Direction.Undefined && territory.EntryDirection != dir)
+                {
+                    string b4anchor = territory.Anchor.ToTuple().ToString();
+                    List<string> b4Rotate = territory.Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
+
+                    var turns = territory.EntryDirection.ClockwiseStepsTo(dir);
+                    territory.Rotate(turns);
+
+                    List<string> afterRotate = territory.Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
+                    _ = Toolbox.LogAsync(level, $"Rotate DEBUG: rotating {turns*90}° (from {territory.EntryDirection}), anchor {b4anchor} -> {territory.Anchor.ToTuple()}, clusters {string.Join(", ", b4Rotate)} -> {string.Join(", ", afterRotate)}");
+                }
 
                 //Fine-tune the insertion spot so it fits right in.
+                var currentPos = territory.Anchor;
                 var planned = newPos.Subtract(currentPos);
-                if (i > 0) newPos = AdjustForInsertion(territory, planned, branch, dir, occupied); //fitted
+                if (i > 0) newPos = AdjustForInsertion(territory, planned, branch, dir, occupied);
 
                 //Move the piece
-                var move = newPos.Subtract(currentPos); //defitted
+                var move = newPos.Subtract(currentPos);
                 var report = territory.Reposition(move);
 
                 //Keep track of occupied areas
-                //var covered = FillArea(territory); //fitted
                 var covered = territory.Contour;
                 if (i == 0) occupied.Clear();
                 occupied.UnionWith(covered);
@@ -793,7 +797,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             var generation = path.Length;
             if (generation <= 2) goto fail; //that would just return the trunk or main branch, in which case regular beahviour will do.
-            bool flag = false;
             for (var i = generation - 1; i > 1; i--)
             {
                 var tested = path.GetAddressAtDepth(i);

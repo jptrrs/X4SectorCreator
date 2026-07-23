@@ -1,4 +1,3 @@
-
 using X4SectorCreator.Objects;
 
 namespace X4SectorCreator.Helpers
@@ -11,7 +10,7 @@ namespace X4SectorCreator.Helpers
             Func<Cluster, List<Point>> selector,
             Predicate<Cluster> filter = null,
             Predicate<(Cluster, Cluster)> comparsion = null,
-            IProgress<int>? progress = null,
+            IProgress<int> progress = null,
             CancellationToken cancellationToken = default)
         {
             var seed = items.FirstOrDefault();
@@ -118,6 +117,24 @@ namespace X4SectorCreator.Helpers
                 rows = ((int)((Math.Max(Math.Abs(allClusters.Max(b => b.Position.Y)), Math.Abs(allClusters.Min(b => b.Position.Y))) + (margin / 2)) * 1.5f)) + 1;
             }
             return (cols, rows);
+        }
+
+        public static Point RotateOrtho(Point current, double cx, double cy, int turns)
+        {
+            // Translate point relative to the center origin
+            double dx = current.X - cx;
+            double dy = current.Y - cy;
+
+            (double rx, double ry) = turns switch
+            {
+                1 => (cx - dy/2, cy + 2*dx), // 90° Counter-Clockwise
+                2 => (cx - dx, cy - dy), // 180° Rotation (Inversion)
+                3 => (cx + dy/2, cy - 2*dx), // 270° Counter-Clockwise (90° Clockwise)
+                0 => (current.X, current.Y), // No rotation
+                _ => throw new ArgumentException("turn parameter should be 1, 2 or 3.")
+            };
+
+            return new Point((int)Math.Round(rx), (int)Math.Round(ry)).FitToHex();
         }
     }
 }

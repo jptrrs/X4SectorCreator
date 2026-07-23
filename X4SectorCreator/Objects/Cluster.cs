@@ -14,7 +14,18 @@ namespace X4SectorCreator.Objects
         public string Soundtrack { get; set; }
         public string Dlc { get; set; }
         public List<Sector> Sectors { get; set; }
-        public Point Position { get; set; }
+        public Point Position
+        {
+            get
+            {
+                return position;
+            }
+            set
+            {
+                position = value;
+                plannedPosition = null;
+            }
+        }
         public bool CustomSectorPositioning { get; set; } = false;
         public string CustomClusterXml { get; set; }
 
@@ -31,6 +42,20 @@ namespace X4SectorCreator.Objects
         internal Dictionary<Sector, List<(Gate, Sector)>> Exits = new Dictionary<Sector, List<(Gate, Sector)>>();
         internal List<int> BridgeFor = new List<int>();
         internal Point AnchorOffset = new Point();
+        private Point? plannedPosition;
+
+        [JsonIgnore]
+        public Point PlannedPosition
+        {
+            get
+            {
+                return plannedPosition ?? Position;
+            }
+            set
+            {
+                plannedPosition = value;
+            }
+        }
 
         [JsonIgnore]
         public int AssignedTerritoryId
@@ -53,6 +78,7 @@ namespace X4SectorCreator.Objects
         }
 
         private int assignedTerritoryId = -1;
+        private Point position;
 
         [JsonIgnore]
         public Hexagon Hexagon { get; set; }

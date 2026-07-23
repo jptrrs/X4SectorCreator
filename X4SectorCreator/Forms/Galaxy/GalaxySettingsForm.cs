@@ -1,9 +1,8 @@
-﻿using Microsoft.VisualBasic;
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using X4SectorCreator.Forms.Galaxy;
-using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
+using X4SectorCreator.Forms.Galaxy.Shuffler;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
 

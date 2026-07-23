@@ -197,4 +197,11 @@
     </Content>
   </ItemGroup>
 
+  <Target Name="_removeUnusedWebView2" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference->WithMetadataValue('FileName', 'Microsoft.Web.WebView2.WinForms'))" Condition="'$(UseWindowsForms)' != 'true'" />
+      <Reference Remove="@(Reference->WithMetadataValue('FileName', 'Microsoft.Web.WebView2.Wpf'))" Condition="'$(UseWpf)' != 'true'" />
+    </ItemGroup>
+  </Target>
+
 </Project>

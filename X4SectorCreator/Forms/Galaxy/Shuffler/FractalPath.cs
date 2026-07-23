@@ -55,5 +55,9 @@
             return (Direction)(((int)given + 2) % 4);
         }
 
+        internal static int ClockwiseStepsTo(this Direction from, Direction to)
+        {
+            return ((int)to - (int)from + 4) % 4;
+        }
     }
 }
