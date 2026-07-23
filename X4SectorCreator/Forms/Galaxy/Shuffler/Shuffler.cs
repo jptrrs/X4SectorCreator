@@ -153,7 +153,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         internal void CarveTerritories(IEnumerable<Cluster> clusters)
         {
             var ordered = clusters.OrderBy(x => x.Position.DistanceSquared(Point.Empty)).ToList();
-            Toolbox.RecursiveProcessing(ordered, SortTerritory, GetNeighbors, x => DLCMatch(x), x => AreConnected(x));
+            Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, x => DLCMatch(x), x => AreConnected(x));
             foreach (var territory in territories.Values)
             {
                 territory.SetUpBox();
