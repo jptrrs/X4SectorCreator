@@ -41,7 +41,7 @@ namespace X4SectorCreator.Objects
         internal List<Sector> Destinations = new List<Sector>();
         internal Dictionary<Sector, List<(Gate, Sector)>> Exits = new Dictionary<Sector, List<(Gate, Sector)>>();
         internal List<int> BridgeFor = new List<int>();
-        internal Point AnchorOffset = new Point();
+        internal Point AnchorOffset = Point.Empty;
         private Point? plannedPosition;
 
         [JsonIgnore]

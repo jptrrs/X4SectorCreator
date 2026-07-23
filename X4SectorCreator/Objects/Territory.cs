@@ -6,14 +6,14 @@ namespace X4SectorCreator.Objects
 {
     internal class Territory : ClusterCollection
     {
-        internal Point Anchor = new Point();
+        internal Point Anchor = Point.Empty;
         internal List<int> annexedIds = new List<int>();
         internal int[] box = new int[4];
         internal List<int> closeColonyIds = new List<int>();
         internal List<int> connectedIds = new List<int>();
         internal List<cPoint> contour = new List<cPoint>();
         internal (double x, double y) Center;
-        internal Point Corner = new Point();
+        internal Point Corner = Point.Empty;
         internal List<Sector> Destinations = new List<Sector>();
         internal string Dlc;
         internal Dictionary<Sector, List<(Gate, Sector)>> Exits = new Dictionary<Sector, List<(Gate, Sector)>>();
@@ -21,7 +21,7 @@ namespace X4SectorCreator.Objects
         internal int Id, AssignedDomainId;
         internal bool IsBridge = false;
         internal Cluster Seed;
-        internal Point Size = new Point();
+        internal Point Size = Point.Empty;
         internal Direction EntryDirection;
         
         private bool overhead = false;

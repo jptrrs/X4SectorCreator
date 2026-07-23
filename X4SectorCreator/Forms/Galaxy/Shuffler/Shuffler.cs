@@ -405,7 +405,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            var slots = new Queue<(Point pos, string add)>([(new Point(0, 0), "0")]);
+            var slots = new Queue<(Point pos, string add)>([(Point.Empty, "0")]);
             var deferred = new Queue<(Point pos, string add)>();
             SortedSet<cPoint> occupied = new SortedSet<cPoint>();
             bool inBounds = true;
@@ -488,7 +488,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
         {
-            Point result = new Point();
+            Point result = Point.Empty;
             switch (direction)
             {
                 case Direction.Undefined:
@@ -550,11 +550,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             bool flushed = false;
             bool attracted = false;
             bool drifted = false;
-            Point drift = new Point();
+            Point drift = Point.Empty;
 
             //1. Flush out the slot if covered.
             var driftDirection = GetDriftDirection(selected);
-            var flush = new Point();
+            var flush = Point.Empty;
             if (occupied.Contains(selected) && TryToPushAround(selected, dir, driftDirection, occupied, 0, 0, 10, ref flush))
             {
                 flushed = true;
@@ -627,7 +627,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             var hexPos = position.WiggleToFit(occupied); //not fitting could result in undetected collisions
             var hits = ScanForCollisions(occupied, hexPos, width, height);
-            pushVector = new Point();
+            pushVector = Point.Empty;
             if (!hits.Any()) return false;
             var minX = hits.MinBy(p => p.X).X;
             var maxX = hits.MaxBy(p => p.X).X + 1; //for comparsions against width
@@ -701,7 +701,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             //Escape if edge case
             if (pos.IsEmpty || pos.X == pos.Y)
             {
-                vector = new Point();
+                vector = Point.Empty;
                 return false;
             }
 
@@ -775,7 +775,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     goto Fail;
             }
             Fail:
-            return new Point();
+            return Point.Empty;
         }
 
         private void HandleMisplaced()
@@ -903,7 +903,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             for (int i = 1; i < maxPush; i++)
             {
                 bool sucess = false;
-                Point target = new Point();
+                Point target = Point.Empty;
                 Direction chosenDir = new Direction();
                 Point forced1 = MoveIntoDirection(primaryDir, position, i);
                 if (singleTile && !occupied.Contains(forced1) || !SimpleCollision(occupied, forced1, width, height))
