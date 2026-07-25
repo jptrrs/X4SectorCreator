@@ -641,7 +641,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
 
             //4. Drift, if possible, around the center
-            if (!isSequence && dir != GetDriftDirection(offset) && Drift(offset, out drift))
+            int fixedDrift = isSequence ? 1 : 0;
+            if (dir != GetDriftDirection(offset) && Drift(offset, out drift, fixedDrift))
             {
                 Point driftedPos = offset.Add(drift);
                 if (!SimpleCollision(occupied, driftedPos, width, height))
@@ -736,7 +737,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return true;
         }
 
-        private bool Drift(Point pos, out Point vector)
+        private bool Drift(Point pos, out Point vector, int fixDrift = 0, int maxDrift = 3)
         {
             //Push the position (pseudo)clockwise based on the distance to the center.
 
@@ -746,26 +747,27 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 vector = Point.Empty;
                 return false;
             }
+            int moveX = fixDrift;
+            int moveY = fixDrift;
+            if (fixDrift == 0)
+            {
+                //Bases
+                float limit = GridFrameBounds.maxY * 1.25f; //not bothering with X because the maps fits a horizontal rectangle.
 
-            //Bases
-            float limit = GridFrameBounds.maxY * 1.25f; //not bothering with X because the maps fits a horizontal rectangle.
-            var maxDrift = 3;
+                //Distance on the Y axis determines drift in the X axis, and vice-versa
+                //Smoothstep easing for values near zero to remain zero while larger values reach maxDrift
+                float normY = Math.Clamp(Math.Abs(pos.Y) / limit, 0f, 1f);
+                float easedY = normY * normY * (3f - 2f * normY); // smoothstep
+                float scaledY = easedY * maxDrift;
+                moveX = scaledY < 0.3f ? 0 : (int)MathF.Round(scaledY);
+                moveX = Math.Min(maxDrift, moveX);
 
-            //Distance on the Y axis determines drift in the X axis, and vice-versa
-            //Smoothstep easing for values near zero to remain zero while larger values reach maxDrift
-            float normY = Math.Clamp(Math.Abs(pos.Y) / limit, 0f, 1f);
-            float easedY = normY * normY * (3f - 2f * normY); // smoothstep
-            float scaledY = easedY * maxDrift;
-            int moveX = scaledY < 0.3f ? 0 : (int)MathF.Round(scaledY);
-            moveX = Math.Min(maxDrift, moveX);
-
-            float normX = Math.Clamp(Math.Abs(pos.X) / limit, 0f, 1f);
-            float easedX = normX * normX * (3f - 2f * normX);
-            float scaledX = easedX * maxDrift;
-            int moveY = scaledX < 0.3f ? 0 : (int)MathF.Round(scaledX);
-            moveY = Math.Min(maxDrift, moveY);
-
-            //Conclusion
+                float normX = Math.Clamp(Math.Abs(pos.X) / limit, 0f, 1f);
+                float easedX = normX * normX * (3f - 2f * normX);
+                float scaledX = easedX * maxDrift;
+                moveY = scaledX < 0.3f ? 0 : (int)MathF.Round(scaledX);
+                moveY = Math.Min(maxDrift, moveY);
+            }
             vector = GetDriftVector(pos, GetDriftDirection(pos), moveX, moveY);
             return !vector.IsEmpty;
         }

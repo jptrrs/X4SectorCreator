@@ -82,7 +82,7 @@ namespace X4SectorCreator.Objects
                 Destinations.Clear();
                 foreach (var item in value)
                 {
-                    if (item.Item1 == null || item.Item2 == null || item.Item3 == null || item.Item4 == null) continue;
+                    if (item.cluster == null || item.origin == null || item.gate == null || item.destination == null) continue;
                     var cluster = item.Item1;
                     var sector = item.Item2;
                     var gate = item.Item3;

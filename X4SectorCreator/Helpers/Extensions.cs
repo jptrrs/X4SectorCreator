@@ -478,6 +478,7 @@ namespace X4SectorCreator.Helpers
             if (!supressLog && (original != target)) File.AppendAllTextAsync("test.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [FitToHex] Moved {original.ToTuple()} {bias} to {target.ToTuple()}{Environment.NewLine}");
             return target;
         }
+
         public static Point WiggleToFit(this Point target, SortedSet<cPoint> occupied)
         {
             if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
