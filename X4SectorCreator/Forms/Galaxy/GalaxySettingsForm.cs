@@ -255,28 +255,6 @@ namespace X4SectorCreator.Forms
         private static bool ContainsGateConnectionsToBaseGameClusters(out List<(Cluster, Sector, Gate)> invalidClusters)
         {
             //Redirected to reusable tool for the sake of simplification.
-
-            //invalidClusters = [];
-            //List<KeyValuePair<(int, int), Cluster>> customClusters = MainForm.Instance.AllClusters
-            //    .Where(a => !a.Value.IsBaseGame)
-            //    .ToList();
-            //foreach (KeyValuePair<(int, int), Cluster> cluster in customClusters)
-            //{
-            //    foreach (Sector sector in cluster.Value.Sectors)
-            //    {
-            //        foreach (Zone zone in sector.Zones)
-            //        {
-            //            foreach (Gate gate in zone.Gates)
-            //            {
-            //                Cluster destCluster = FindDestinationCluster(gate);
-            //                if (destCluster.IsBaseGame)
-            //                {
-            //                    invalidClusters.Add((cluster.Value, sector, gate));
-            //                }
-            //            }
-            //        }
-            //    }
-            //}
             var customClusters = MainForm.Instance.AllClusters.Where(a => !a.Value.IsBaseGame).Select(a => a.Value);
             invalidClusters = ClusterManager.PickDestinations(customClusters, c => c.IsBaseGame).Select(x => (x.Item1, x.Item2, x.Item3)).ToList();
             return invalidClusters.Count > 0;
@@ -399,23 +377,7 @@ namespace X4SectorCreator.Forms
                 _ = MessageBox.Show("No clusters found to shuffle. Please generate or load a galaxy first.", "Shuffle Galaxy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            //int colMin = clusterSet.Min(a => a.Position.X);
-            //int colMax = clusterSet.Max(a => a.Position.X);
-            //int rowMin = clusterSet.Min(b => b.Position.Y);
-            //int rowMax = clusterSet.Max(b => b.Position.Y);
-            //int cols = colMax - colMin + 1;
-            //int rows = rowMax - rowMin + 1;
-            //var msg =$"{count} systems accounted for, in a {cols}x{rows} grid", ;
-
             var shuffler = new Shuffler(clusterSet);
-            //var msg = $"{shuffler.territories.Count} territories found.";
-
-            //var annexed = shuffler.territories.Values.Where(x => x.annexedIds.Count > 0).Select(x => x.Seed.Name).ToList();
-            //string annexedOutput = $"\n{annexed.Count} annexed ({string.Join(", ", annexed)}).";
-
-            //string bridges = $"\n{shuffler.tempReport}: {string.Join(", ", shuffler.tempReportList)}.";
-
-            //_ = MessageBox.Show(msg + annexedOutput + bridges, "Shuffle Galaxy", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void chkDisableAllStorylines_CheckedChanged(object sender, EventArgs e)
