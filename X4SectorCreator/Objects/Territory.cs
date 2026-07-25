@@ -6,34 +6,33 @@ namespace X4SectorCreator.Objects
 {
     internal class Territory : ClusterCollection
     {
-        internal Point Anchor = Point.Empty;
+        internal Point anchor = Point.Empty;
         internal List<int> annexedIds = [];
-        internal int[] box = new int[4];
         internal List<int> closeColonyIds = [];
-        internal List<int> connectedIds = [];
         internal List<cPoint> contour = [];
-        internal (double x, double y) Center;
-        internal Point Corner = Point.Empty;
-        internal List<Sector> Destinations = [];
-        internal string Dlc;
-        internal Dictionary<Sector, List<(Gate, Sector)>> Exits = [];
-        internal List<Cluster> Frontiers = [];
-        internal int Id, AssignedDomainId;
-        internal bool IsBridge = false;
+        internal string dlc;
+        internal Direction entryDirection;
+        internal List<Cluster> frontiers = [];
+        internal int id, assignedDomainId;
+        internal bool isBridge = false;
         internal bool? isVanilla;
-        internal Cluster Seed;
-        internal Point Size = Point.Empty;
-        internal Direction EntryDirection;
-        
+        internal List<int> peers = [];
+        internal Cluster seed;
+        internal Point size = Point.Empty;
+        private int[] box = new int[4];
+
+        private (double x, double y) center;
+        private List<Sector> destinations = [];
+        private Dictionary<Sector, List<(Gate gate, Sector sector)>> exits = [];
         private bool overhead = false;
 
         internal Territory(Cluster seed, int lastID)
         {
             Clusters = [seed];
-            Id = lastID + 1;
-            AssignedDomainId = 0;
-            Seed = seed;
-            Dlc = seed.Dlc;
+            id = lastID + 1;
+            assignedDomainId = 0;
+            this.seed = seed;
+            dlc = seed.Dlc;
         }
 
         internal List<cPoint> Contour
@@ -63,13 +62,13 @@ namespace X4SectorCreator.Objects
             get
             {
                 var roads = new List<(Cluster, Sector, Gate, Sector)>();
-                foreach (var cluster in Frontiers)
+                foreach (var cluster in frontiers)
                 {
-                    foreach (var sector in Exits.Keys)
+                    foreach (var sector in exits.Keys)
                     {
-                        foreach (var exit in Exits[sector])
+                        foreach (var exit in exits[sector])
                         {
-                            roads.Add((cluster, sector, exit.Item1, exit.Item2));
+                            roads.Add((cluster, sector, exit.gate, exit.sector));
                         }
                     }
                 }
@@ -77,9 +76,9 @@ namespace X4SectorCreator.Objects
             }
             set
             {
-                Frontiers.Clear();
-                Exits.Clear();
-                Destinations.Clear();
+                frontiers.Clear();
+                exits.Clear();
+                destinations.Clear();
                 foreach (var item in value)
                 {
                     if (item.cluster == null || item.origin == null || item.gate == null || item.destination == null) continue;
@@ -87,20 +86,21 @@ namespace X4SectorCreator.Objects
                     var sector = item.Item2;
                     var gate = item.Item3;
                     var dest = item.Item4;
-                    Frontiers.AddUnique(cluster);
-                    Destinations.AddUnique(dest);
-                    if (Exits.ContainsKey(sector))
+                    frontiers.AddUnique(cluster);
+                    destinations.AddUnique(dest);
+                    if (exits.ContainsKey(sector))
                     {
-                        Exits[sector].AddUnique((gate, dest));
+                        exits[sector].AddUnique((gate, dest));
                     }
                     else
                     {
-                        Exits.Add(sector, new List<(Gate, Sector)> { (gate, dest) });
+                        exits.Add(sector, new List<(Gate, Sector)> { (gate, dest) });
                     }
                 }
-                SetUpDirection();
             }
         }
+
+        internal int HeightToFit => overhead ? size.Y + 1 : size.Y;
 
         internal bool IsVanilla
         {
@@ -110,24 +110,33 @@ namespace X4SectorCreator.Objects
                 {
                     isVanilla = Clusters.Any(x => string.IsNullOrWhiteSpace(x.Dlc));
                 }
-                return (bool) isVanilla;
+                return (bool)isVanilla;
             }
         }
 
-        internal int HeightToFit => overhead ? Size.Y + 1 : Size.Y;
-
         internal string Reposition(Point displacement)
         {
-            Anchor = Anchor.Add(displacement);
+            anchor = anchor.Add(displacement);
             List<string> list = new List<string>();
             foreach (var cluster in Clusters)
             {
-                cluster.Position = Anchor.Add(cluster.AnchorOffset);
+                cluster.Position = anchor.Add(cluster.AnchorOffset);
                 cluster.shuffled = true;
                 list.Add($"{cluster.Name}({cluster.Position.ToTuple()})");
             }
-            string report = $"\n{Seed.Name} moved to {Anchor.ToTuple()}: {string.Join(", ", list.ToArray())}";
+            string report = $"\n{seed.Name} moved to {anchor.ToTuple()}: {string.Join(", ", list.ToArray())}";
             return report;
+        }
+
+        internal void Rotate(int turns)
+        {
+            foreach (var c in Clusters)
+            {
+                c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, center.x, center.y, turns);
+            }
+            SetUpBox();
+            List<string> afterRotate = Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{id}-{seed.Name} rotated {turns * 90}° (from {entryDirection})");
         }
 
         internal void SetUpBox()
@@ -141,13 +150,13 @@ namespace X4SectorCreator.Objects
             box[3] = posY.Max();
             var width = box[0] - box[2] + 1;
             var height = box[3] - box[1] + 2;
-            Corner = new Point(box[2], box[3]);
-            Anchor = Corner.FitToHex();
-            Size = new Point(width, height);
-            overhead = Anchor.Y > box[3];
-            double centerX = Anchor.X + (Size.X - 1) / 2.0;
-            double centerY = Anchor.Y - (Size.Y - 2) / 2.0;
-            Center = (centerX, centerY);
+            var corner = new Point(box[2], box[3]);
+            anchor = corner.FitToHex();
+            size = new Point(width, height);
+            overhead = anchor.Y > box[3];
+            double centerX = anchor.X + (size.X - 1) / 2.0;
+            double centerY = anchor.Y - (size.Y - 2) / 2.0;
+            center = (centerX, centerY);
             SetUpClustersOffsets();
         }
 
@@ -155,38 +164,39 @@ namespace X4SectorCreator.Objects
         {
             foreach (var cluster in Clusters)
             {
-                cluster.AnchorOffset = cluster.PlannedPosition.Subtract(Anchor);
+                cluster.AnchorOffset = cluster.PlannedPosition.Subtract(anchor);
             }
         }
 
         internal void SetUpDirection()
         {
-            if (Size.IsEmpty) SetUpBox();
+            if (size.IsEmpty) SetUpBox();
             Direction exitDir = Direction.Undefined;
-            if (Size.X <= 1 && Size.Y <= 2)
+            if (size.X <= 1 && size.Y <= 2)
             {
-                EntryDirection = exitDir;
+                entryDirection = exitDir;
                 return;
             }
             int voteUp = 0;
             int voteDown = 0;
             int voteRight = 0;
             int voteLeft = 0;
-            foreach (var cluster in Frontiers)
+            var outbound = frontiers.Where(c => c.Destinations.Any(s => !peers.Contains(s.AssignedTerritoryId)));
+            foreach (var cluster in outbound)
             {
-                if (cluster.Position.X < Center.x) voteLeft++;
-                else if (cluster.Position.X > Center.x) voteRight++;
-                if (cluster.Position.Y > Center.y) voteUp++;
-                else if (cluster.Position.Y < Center.y) voteDown++;
+                if (cluster.Position.X < center.x) voteLeft++;
+                else if (cluster.Position.X > center.x) voteRight++;
+                if (cluster.Position.Y > center.y) voteUp++;
+                else if (cluster.Position.Y < center.y) voteDown++;
             }
             Direction vOption = exitDir;
-            if (Size.Y > 2)
+            if (size.Y > 2)
             {
                 if (voteUp > 0 && voteDown < voteUp) vOption = Direction.Up;
                 if (voteDown > 0 && voteDown > voteUp) vOption = Direction.Down;
             }
             Direction hOption = exitDir;
-            if (Size.X > 1)
+            if (size.X > 1)
             {
                 if (voteRight > 0 && voteRight > voteLeft) hOption = Direction.Right;
                 if (voteLeft > 0 && voteRight < voteLeft) hOption = Direction.Left;
@@ -200,24 +210,7 @@ namespace X4SectorCreator.Objects
                 if (goV > goH) exitDir = vOption;
                 else exitDir = hOption;
             }
-            EntryDirection = exitDir.OppositeDir();
-        }
-
-        internal float SizeToContentRatio()
-        {
-            var area = Size.X * Size.Y;
-            return area / Clusters.Count;
-        }
-
-        internal void Rotate(int turns)
-        {
-            foreach (var c in Clusters)
-            {
-                c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, Center.x, Center.y, turns);
-            }
-            SetUpBox();
-            List<string> afterRotate = Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{Id}-{Seed.Name} rotated {turns * 90}° (from {EntryDirection})");
+            entryDirection = exitDir.OppositeDir();
         }
     }
 }

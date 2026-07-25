@@ -1,7 +1,9 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
+using static X4SectorCreator.Objects.Constructionplan;
 
 namespace X4SectorCreator.Forms.Galaxy.Shuffler
 {
@@ -105,10 +107,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 .ToHashSet();
             return crowd.Where(cluster => targetPositions.Contains(cluster.Position));
         };
-
         private Func<Cluster, bool> DLCMatch => cluster =>
         {
-            return cluster.Dlc == territories.Last().Value.Dlc;
+            return cluster.Dlc == territories.Last().Value.dlc;
         };
 
         private Action<Cluster, bool> SortTerritory => (cluster, reset) =>
@@ -116,15 +117,15 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             if (reset)
             {
                 var newTerritory = new Territory(cluster, territories.Count);
-                territories.Add(newTerritory.Id, newTerritory);
-                cluster.AssignedTerritoryId = newTerritory.Id;
+                territories.Add(newTerritory.id, newTerritory);
+                cluster.AssignedTerritoryId = newTerritory.id;
                 return;
             }
             var territory = territories.Last().Value;
             territory.Clusters.Add(cluster);
-            cluster.AssignedTerritoryId = territory.Id;
+            cluster.AssignedTerritoryId = territory.id;
         };
-        internal void CarveTerritories(IEnumerable<Cluster> clusters)
+        private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
             var ordered = clusters.OrderBy(x => x.Position.DistanceSquaredOnHexGrid(Point.Empty)).ToList();
             Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, x => DLCMatch(x), x => AreConnected(x));
@@ -134,7 +135,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
-        internal void ConsolidateDomains()
+        private void ConsolidateDomains()
         {
             // Build groups by merging any overlapping sets into larger ones.
             var groups = new List<HashSet<int>>();
@@ -194,33 +195,38 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 consolidated.Add(idx++, reordered);
             }
             domains = DesignatedDomains(consolidated);
-            count += domains.Count - idx;
+
+            //Now we're able to calculate territories' preferred orientations:
+            InferOrientations();
 
             // logging
+            count += domains.Count - idx;
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}\n{count} territories total.");
         }
 
-        internal Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
+        private Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
         {
             if (!set.Any()) return set;
             foreach (var d in set)
             {
                 foreach (var id in d.Value)
                 {
-                    territories[id].AssignedDomainId = d.Key;
+                    var territory = territories[id];
+                    territory.assignedDomainId = d.Key;
+                    territory.peers = d.Value;
                 }
             }
             var i = set.Count + 1;
-            foreach (var t in territories.Values.Where(t => t.AssignedDomainId == 0))
+            foreach (var t in territories.Values.Where(t => t.assignedDomainId == 0))
             {
                 var n = i++;
-                t.AssignedDomainId = n;
-                set.Add(n, [t.Id]);
+                t.assignedDomainId = n;
+                set.Add(n, [t.id]);
             }
             return set;
         }
 
-        internal void FindAnnexed()
+        private void FindAnnexed()
         {
             foreach (var territory in territories.Values)
             {
@@ -239,19 +245,19 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                             !origin.Owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
                         {
                             territory.annexedIds.AddUnique(foundId);
-                            territories[foundId].annexedIds.AddUnique(territory.Id);
+                            territories[foundId].annexedIds.AddUnique(territory.id);
                             var key = domains.Count + 1;
-                            domains.Add(key, [territory.Id, foundId]);
+                            domains.Add(key, [territory.id, foundId]);
                         }
                     }
                 }
             }
         }
 
-        internal void FindCloseColonies()
+        private void FindCloseColonies()
         {
             var candidates = territories.Values
-                .SelectMany(t => t.Frontiers)
+                .SelectMany(t => t.frontiers)
                 .Where(c => c.ExitPoints?.Count > 1 && c.Exits.Keys.All(s => s.IsNeutral))
                 .ToList();
             foreach (var cluster in candidates)
@@ -267,20 +273,20 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     foreach (var neighbor in grouped)
                     {
-                        neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.Id));
+                        neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.id));
                     }
-                    var bridged = grouped.Select(x => x.Id).ToList();
+                    var bridged = grouped.Select(x => x.id).ToList();
                     cluster.BridgeFor.AddRange(bridged);
                     var bridge = territories[cluster.AssignedTerritoryId];
-                    bridge.IsBridge = true;
-                    var extents = bridged.Append(bridge.Id).ToList();
+                    bridge.isBridge = true;
+                    var extents = bridged.Append(bridge.id).ToList();
                     var id = domains.Count + 1;
                     domains.Add(id, extents);
                 }
             }
         }
 
-        internal void FindConnections()
+        private void FindConnections()
         {
             foreach (var territory in territories.Values)
             {
@@ -288,7 +294,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 foreach (var cluster in territory.Clusters)
                 {
                     cluster.ExitPoints = ClusterManager.PickDestinationsFromCluster(cluster, c => c != cluster);
-                    foreach (var exit in cluster.ExitPoints.Where(x => x.destination.AssignedTerritoryId != territory.Id))
+                    foreach (var exit in cluster.ExitPoints.Where(x => x.destination.AssignedTerritoryId != territory.id))
                     {
                         roads.Add((cluster, exit.origin, exit.gate, exit.destination));
                     }
@@ -296,24 +302,36 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 territory.ExitPoints = roads;
             }
         }
+        
         private bool KeepSequence(List<Territory> set)
         {
             //Spares certain domain sets from spawning in randomized order: , .
-            return set.Any(x => x.IsBridge) // close colonies
-                || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.Dlc))); // annexed + DLC
+            return set.Any(x => x.isBridge) // close colonies
+                || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.dlc))); // annexed + DLC
         }
+        
         private void TerritoriesReport()
         {
-            var log = new List<string>();
+            var log = new StringBuilder();
+            log.AppendLine($"\n\n--- Territories ---\n\n");
             foreach (var t in territories.Values)
             {
-                var owner = $"; Owner: {t.Seed.Sectors[0].Owner}";
-                string annexed = t.annexedIds.Count > 0 ? $"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].Id}-{territories[x].Seed.Name}"))}" : "";
-                string bridge = t.IsBridge ? $"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].Id}-{territories[y].Seed.Name}"))}" : "";
-                string colonies = t.closeColonyIds.Count > 0 ? $"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].Id}-{territories[x].Seed.Name}"))}" : "";
-                log.Add($"\n{t.Id} - {t.Seed.Name}: {t.Clusters.Count} clusters, {t.Frontiers.Count} connecting, entry from {t.EntryDirection}{annexed}{bridge}{colonies}{owner}.");
+                var owner = t.seed.Sectors[0].IsNeutral ? "Neutral" : t.seed.Sectors[0].Owner;
+                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.frontiers.Count} connecting, entry from {t.entryDirection}");
+                if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
+                if (t.isBridge) log.Append($"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].id}-{territories[y].seed.Name}"))}");
+                if (t.closeColonyIds.Count > 0) log.Append($"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
+                log.AppendLine(".");
             }
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString());
+        }
+
+        private void InferOrientations()
+        {
+            foreach (var territory in territories.Values)
+            {
+                territory.SetUpDirection();
+            }
         }
 
         #endregion
@@ -444,7 +462,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 _ = Toolbox.LogAsync(level, $"Step {i}, branch {branch}, slot @ {position.ToTuple()}/{direction}/{path}", true);
                 if (valid)
                 {
-                    _ = Toolbox.LogAsync(level, $"Assigning #{territory.Id}-{territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters");
+                    _ = Toolbox.LogAsync(level, $"Assigning #{territory.id}-{territory.seed.Name}, size=({territory.size.ToTuple()}, {territory.Clusters.Count} clusters");
                 }
                 else
                 {
@@ -453,14 +471,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
 
                 //Rotate it as needed.
-                if (direction != Direction.Undefined && territory.EntryDirection != Direction.Undefined && territory.EntryDirection != direction)
+                if (direction != Direction.Undefined && territory.entryDirection != Direction.Undefined && territory.entryDirection != direction)
                 {
-                    var turns = territory.EntryDirection.ClockwiseStepsTo(direction);
+                    var turns = territory.entryDirection.ClockwiseStepsTo(direction);
                     territory.Rotate(turns);
                 }
 
                 //Fine-tune the insertion spot so it fits right in.
-                var currentPos = territory.Anchor;
+                var currentPos = territory.anchor;
                 var planned = position.Subtract(currentPos);
                 if (i > 0) position = AdjustForInsertion(territory, planned, branch, direction, occupied, isSequence);
 
@@ -495,6 +513,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             HandleMisplaced();
         }
+        
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
         {
             Point result = Point.Empty;
@@ -547,8 +566,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private Point AdjustForInsertion(Territory territory, Point displacement, Direction branch, Direction dir, SortedSet<cPoint> occupied, bool isSequence)
         {
-            var selected = territory.Anchor.Add(displacement);
-            var width = territory.Size.X;
+            var selected = territory.anchor.Add(displacement);
+            var width = territory.size.X;
             var oddHeight = territory.HeightToFit;
             var height = oddHeight + oddHeight % 2;
             var flipX = width - 1;
@@ -583,7 +602,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 if (adjust.IsEmpty)
                 {
                     //This means this slot was boxed in! Last attempt to place it...
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.Id}: there wasn't enough space for it! Attempting a forced push...");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.id}: there wasn't enough space for it! Attempting a forced push...");
                     if (!TryToPushAround(offset, branch, dir, occupied, width, height, 20, ref adjust))
                     {
                         _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...still couldn't place it over the next 20 tiles! Giving up.");
@@ -622,7 +641,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var result = offset.FitToHex();
 
             //logging
-            List<string> report = [$"#{territory.Id} inserted @ {result.ToTuple()}, from {slot}{dir}"];
+            List<string> report = [$"#{territory.id} inserted @ {result.ToTuple()}, from {slot}{dir}"];
             if (flushed) report.Add($"moved to uncover by {flush.ToTuple()}");
             report.Add($"anchor @ {relative}");
             if (drifted) report.Add($"drifted by {drift.ToTuple()}");
@@ -800,7 +819,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 y++;
                 if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{c.Name}, from territory #{c.AssignedTerritoryId}-{territories[c.AssignedTerritoryId].Seed.Name}, placed @ ({c.Position.ToTuple()}).");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{c.Name}, from territory #{c.AssignedTerritoryId}-{territories[c.AssignedTerritoryId].seed.Name}, placed @ ({c.Position.ToTuple()}).");
                 }
                 else
                 {
@@ -833,9 +852,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             bool firstRun = branch == Direction.Undefined;
             bool quadrant = branch != helixLastBranch;
             bool cycle = quadrant && branch == Direction.Right;
-            var ax = territory.Anchor.X;
-            var ay = territory.Anchor.Y;
-            var width = territory.Size.X;
+            var ax = territory.anchor.X;
+            var ay = territory.anchor.Y;
+            var width = territory.size.X;
             var height = territory.HeightToFit;
             var slots = new List<(Point pos, string add)>();
             var max = occupied.Max();
@@ -885,9 +904,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             if (slots.Count() == 0)
             {
-                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.Id}! Branch: {branch})");
+                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.id}! Branch: {branch})");
             }
-            _ = Toolbox.LogAsync(level, $"Slots around #{territory.Id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
+            _ = Toolbox.LogAsync(level, $"Slots around #{territory.id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
 
             //House keeping
             helixLastBranch = branch;
