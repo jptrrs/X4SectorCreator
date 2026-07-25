@@ -182,12 +182,28 @@ namespace X4SectorCreator.Objects
             int voteRight = 0;
             int voteLeft = 0;
             var outbound = frontiers.Where(c => c.Destinations.Any(s => !peers.Contains(s.AssignedTerritoryId)));
-            foreach (var cluster in outbound)
+            List<Cluster> accountedFor = [];
+            foreach (var c in outbound)
             {
-                if (cluster.Position.X < center.x) voteLeft++;
-                else if (cluster.Position.X > center.x) voteRight++;
-                if (cluster.Position.Y > center.y) voteUp++;
-                else if (cluster.Position.Y < center.y) voteDown++;
+                //Cluster position relative to its territory
+                if (c.Position.X < center.x) voteLeft++;
+                else if (c.Position.X > center.x) voteRight++;
+                if (c.Position.Y > center.y) voteUp++;
+                else if (c.Position.Y < center.y) voteDown++;
+                
+                //Destinations relative cluster position
+                //The more destinations from a cluster, bigger weight given to this.
+                foreach (var s in c.Destinations)
+                {
+                    if (peers.Contains(s.AssignedTerritoryId)) continue;
+                    var d = s.FindCluster();
+                    if (accountedFor.Contains(d)) continue; //so we don't double-count
+                    if (c.Position.X < d.Position.X) voteRight++;
+                    else if(c. Position.X > d.Position.X) voteLeft++;
+                    if (c.Position.Y > d.Position.Y) voteDown++;
+                    else if (c.Position.Y < d.Position.Y) voteUp++;
+                    accountedFor.Add(d);
+                }
             }
             Direction vOption = exitDir;
             if (size.Y > 2)
