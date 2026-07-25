@@ -494,6 +494,14 @@ namespace X4SectorCreator.Helpers
             return target;
         }
 
+        //Distance calculation, but considering the hex grid.
+        public static long DistanceSquaredOnHexGrid(this Point p1, Point p2)
+        {
+            long dx = p1.X - p2.X;
+            long dy = (p1.Y - p2.Y) / 2;
+            return dx * dx + dy * dy;
+        }
+
         //Reverse Dictionary lookup
         public static IEnumerable<TKey> ReverseLookup<TKey, TValue>(this IDictionary<TKey, TValue> source, TValue sample)
         {

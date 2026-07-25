@@ -54,11 +54,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return !territory.Clusters.Contains(cluster);
         };
 
-        //Spares certain domain sets from spawning in randomized order: close colonies.
-        private readonly Func<Territory, bool> KeepSequence = t =>
+        //Spares certain domain sets from spawning in randomized order: , .
+        private bool KeepSequence(List<Territory> set)
         {
-            return t.IsBridge;
-        };
+            return set.Any(x => x.IsBridge) // close colonies
+                || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.Dlc))); // annexed + DLC
+        }
 
         private int helixGeneration = 1;
         private Direction helixLastBranch = Direction.Up;
@@ -107,10 +108,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var log = new List<string>();
             foreach (var t in territories.Values)
             {
+                var owner = $"; Owner: {t.Seed.Sectors[0].Owner}";
                 string annexed = t.annexedIds.Count > 0 ? $"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].Id}-{territories[x].Seed.Name}"))}" : "";
                 string bridge = t.IsBridge ? $"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].Id}-{territories[y].Seed.Name}"))}" : "";
                 string colonies = t.closeColonyIds.Count > 0 ? $"; colonies { string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].Id}-{territories[x].Seed.Name}"))}" : "";
-                log.Add($"\n{t.Id} - {t.Seed.Name}: {t.Clusters.Count} clusters, {t.Frontiers.Count} connecting, entry from {t.EntryDirection}{annexed}{bridge}{colonies}.");
+                log.Add($"\n{t.Id} - {t.Seed.Name}: {t.Clusters.Count} clusters, {t.Frontiers.Count} connecting, entry from {t.EntryDirection}{annexed}{bridge}{colonies}{owner}.");
             }
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"\n\n--- Territories ---\n{string.Join("", log)}");
         }
@@ -152,7 +154,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         internal void CarveTerritories(IEnumerable<Cluster> clusters)
         {
-            var ordered = clusters.OrderBy(x => x.Position.DistanceSquared(Point.Empty)).ToList();
+            var ordered = clusters.OrderBy(x => x.Position.DistanceSquaredOnHexGrid(Point.Empty)).ToList();
             Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, x => DLCMatch(x), x => AreConnected(x));
             foreach (var territory in territories.Values)
             {
@@ -208,9 +210,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 count += g.Count;
                 List<int> reordered = [];
-                if (g.Any(x => KeepSequence(territories[x])))
+                if (KeepSequence(g.Select(x => territories[x]).ToList()))
                 {
-                    reordered = g.ToList();
+                    reordered = g.OrderBy(x => x).ToList();
                     sequentialDomains.Add(idx); //note that down for later.
                 }
                 else
@@ -223,7 +225,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             count += domains.Count - idx;
 
             // logging
-            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}\n{count} territories total.");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key)?"S":"")}"))}\n{count} territories total.");
         }
 
         internal Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
@@ -259,7 +261,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     if (foundId > 0)
                     {
                         if (territory.annexedIds.Contains(foundId)) continue;
-                        if (origin.Owner != null && !origin.IsNeutral && origin.Owner.Equals(destination.Owner, StringComparison.Ordinal))
+                        if (origin.Owner != null &&
+                            !origin.IsNeutral &&
+                            origin.Owner.Equals(destination.Owner, StringComparison.Ordinal) &&
+                            !origin.Owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
                         {
                             territory.annexedIds.AddUnique(foundId);
                             territories[foundId].annexedIds.AddUnique(territory.Id);
@@ -280,7 +285,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var cluster in candidates)
             {
                 var connected = cluster.Destinations
-                    .Where(s => !s.IsNeutral)
+                    .Where(s => !s.IsNeutral && !s.Owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
                     .GroupBy(s => s.Owner)
                     .Where(g => g.Count() > 1)
                     .Select(g => g.Select(s => territories[s.AssignedTerritoryId]))
@@ -296,8 +301,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     cluster.BridgeFor.AddRange(bridged);
                     var bridge = territories[cluster.AssignedTerritoryId];
                     bridge.IsBridge = true;
+                    var extents = bridged.Append(bridge.Id).ToList();
                     var id = domains.Count + 1;
-                    domains.Add(id, bridged.Prepend(bridge.Id).ToList());
+                    domains.Add(id, extents);
                 }
             }
         }
@@ -319,7 +325,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
-        internal Territory PickNextFromStaged(string path, bool sequencesAllowed, out bool isSequence)
+        internal Territory PickNextFromStaged(string path, bool sequencesAllowed, ref int skipTracker, out bool isSequence)
         {
             bool domsRemain = domains.Count > 0;
             bool stagedRemain = staged.Count > 0;
@@ -330,9 +336,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 isSequence = false;
                 return null;
             }
-            isSequence = HasAncestorStaged(path, out string ancestor);
-            var branch = isSequence ? ancestor : path.GetAddressAtDepth(1); //selects either the root branch or the divergence point for a sequence
-            if (branch == "0" || branch == "") branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
+
+            string branch;
+            bool startsSequence = false;
+
+            isSequence = HasAncestorStaged(path, out string ancestor); //detects if the path is from a sequence that already started.
+            branch = isSequence ? ancestor : path.GetAddressAtDepth(1); //selects either the main branch or the divergence point for a sequence
+            if (string.IsNullOrEmpty(branch) || branch == "0") branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
             if (!isSequence && !staged.ContainsKey(branch))
             {
                 staged.Add(branch, new List<int>());
@@ -342,41 +352,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 //The requested branch is currently empty, so...
                 if (!domsRemain)
                 {
-                    //The queue is empty!
-                    //Cross out that branch (it will be re-added automatically later if needed)
+                    //The queue is empty! Cross out that branch (it will be re-added automatically later if needed) and bail out.
                     staged.Remove(branch);
-                    //Check and report fail state:
-                    if (stagedRemain)
-                    {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"We've run out of domains before all staged were distributed. Requested branch was {branch}. Staged: {string.Join("; ", staged.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
-                    }
-                    else
-                    {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: both domains lists were exhausted, yet another territory was requested anyway! Requested branch was {branch}.");
-                    }
-                    return null; //...give up
+                    skipTracker++;
+                    return null;
                 }
                 //Load another set:
-                var regularDomains = domains.Where(x => !sequentialDomains.Contains(x.Key));
-                bool holdSequences = !sequencesAllowed && regularDomains.Any();
-                var set = holdSequences ? regularDomains.Random() : domains.Random();
-                if (set.Value == null)
-                {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, isSequence={isSequence}, sequencesAllowed={sequencesAllowed}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
-                }
-                if (sequencesAllowed && sequentialDomains.Contains(set.Key) && !staged.ContainsKey(path))
-                {
-                    //It's a colony sequence, needs own branch.
-                    staged.Add(path, set.Value);
-                    domains.Remove(set.Key);
-                    branch = path;
-                }
-                else
-                {
-                    //New set replaces the depleted one.
-                    staged[branch] = set.Value;
-                    domains.Remove(set.Key);
-                }
+                //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
+                branch = RefreshStage(branch, path, sequencesAllowed, ref startsSequence);
             }
             if (!staged.TryGetValue(branch, out var selected) || selected == null || selected.Count == 0)
             {
@@ -389,9 +372,36 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 selected = selected.Where(x => territories.ContainsKey(x)).ToList();
                 if (selected.Count == 0) return null;
             }
-            var card = selected.Any(x => territories[x].IsBridge) ? selected.First() : selected.RandomOrDefault();
+            var card = (startsSequence || isSequence) ? selected.First() : selected.RandomOrDefault();
             staged[branch].Remove(card);
             return territories[card];
+        }
+
+        private string RefreshStage(string branch, string path, bool sequencesAllowed, ref bool newSequence)
+        {
+            var regularDomains = domains.Where(x => !sequentialDomains.Contains(x.Key));
+            bool holdSequences = !sequencesAllowed && regularDomains.Any();
+            var set = holdSequences ? regularDomains.Random() : domains.Random();
+            if (set.Value == null)
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, sequencesAllowed={sequencesAllowed}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+            }
+            if (sequencesAllowed && sequentialDomains.Contains(set.Key) /*&& !staged.ContainsKey(path)*/)
+            {
+                //It's a sequence, needs own branch.
+                staged.Add(path, set.Value);
+                domains.Remove(set.Key);
+                branch = path;
+                newSequence = true;
+            }
+            else
+            {
+                //New set replaces the depleted one.
+                staged[branch] = set.Value;
+                domains.Remove(set.Key);
+            }
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Starting a new domain - [{string.Join(", ",set.Value)}]. Draw order will be {(newSequence ? "SEQUENTIAL" : "random")}. New branch is {branch}.", true);
+            return branch;
         }
 
         internal void Shuffle()
@@ -405,58 +415,89 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            var slots = new Queue<(Point pos, string add)>([(Point.Empty, "0")]);
+            var slots = new Queue<(Point pos, string path)>([(Point.Empty, "")]);
             var deferred = new Queue<(Point pos, string add)>();
             SortedSet<cPoint> occupied = new SortedSet<cPoint>();
             bool inBounds = true;
-            for (int i = 0; i < cards.Count; i++)
+
+            bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
-                Selection:
-                //Pick the next slot.
-                if (slots.Count == 0)
+                bool flag = false;
+                territory = null; 
+                isSequence = false;
+                pos = Point.Empty;
+                dir = Direction.Undefined;
+                branch = Direction.Undefined;
+                path = null;
+                int skipTracker = 0;
+                while (slots.Count > 0)
                 {
-                    if (deferred.Any())
+                    var slot = slots.Dequeue();
+                    path = slot.path;
+                    pos = slot.pos;
+                    dir = path.GetDirection();
+                    branch = path.GetMainBranch();
+                    bool sequencesAllowed = dir != branch; //This makes them necessarily linear
+                    territory = PickNextFromStaged(slot.path, sequencesAllowed, ref skipTracker, out isSequence);
+                    flag = territory != null;
+                    if (flag)
                     {
-                        slots = deferred;
-                        inBounds = false;
-                        _ = Toolbox.LogAsync(level, $"Bounds reached, spilling over!");
-                    }
-                    else
-                    {
-                        _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots!", true);
+                        if (skipTracker > 0)
+                        {
+                            _ = Toolbox.LogAsync(level, $"We've run out of domains before all staged were distributed. {skipTracker} slots were skipped while looking for the next viable one.", true);
+                        }
                         break;
                     }
-                }
-                var slot = slots.Dequeue();
-                var newPos = slot.pos;
-                var dir = slot.add.GetDirection();
-                var branch = slot.add.GetMainBranch();
-
-                //Select next territory.
-                bool sequencesAllowed = dir == Direction.Undefined || dir == branch;
-                var territory = PickNextFromStaged(slot.add, sequencesAllowed, out var isSequence);
-                if (territory == null)
-                {
                     if (inBounds) deferred.Enqueue(slot); //recycle slots by throwing them back at the end of the line.
-                    goto Selection;
+                    if (slots.Count == 0)
+                    {
+                        if (deferred.Count > 0)
+                        {
+                            //refresh slots queue and switch to plan B.
+                            slots = deferred;
+                            inBounds = false;
+                            _ = Toolbox.LogAsync(level, $"Bounds reached, spilling over!", true);
+                        }
+                        else
+                        {
+                            //end of the line
+                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots!", true);
+                        }
+                    }
                 }
-                _ = Toolbox.LogAsync(level, $"Step {i}, branch {branch}, slot @ {newPos.ToTuple()}/{dir}/{slot.add}", true);
-                _ = Toolbox.LogAsync(level, $"Assigning #{territory.Id}-{territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters");
+                return flag;
+            }
+
+            for (int i = 0; i < cards.Count; i++)
+            {
+                bool valid = TryGetTerritory(out var territory, out var isSequence, out var position, out var direction, out var branch, out var path);
+
+                //Reporting territory selection
+                _ = Toolbox.LogAsync(level, $"Step {i}, branch {branch}, slot @ {position.ToTuple()}/{direction}/{path}", true);
+                if (valid)
+                {       
+                    _ = Toolbox.LogAsync(level, $"Assigning #{territory.Id}-{territory.Seed.Name}, size=({territory.Size.ToTuple()}, {territory.Clusters.Count} clusters");
+                }
+                else
+                {
+                    _ = Toolbox.LogAsync(level, $"ERROR: we've run out of territories to assign to slots!");
+                    break;
+                }
 
                 //Rotate it as needed.
-                if (dir != Direction.Undefined && territory.EntryDirection != Direction.Undefined && territory.EntryDirection != dir)
+                if (direction != Direction.Undefined && territory.EntryDirection != Direction.Undefined && territory.EntryDirection != direction)
                 {
-                    var turns = territory.EntryDirection.ClockwiseStepsTo(dir);
+                    var turns = territory.EntryDirection.ClockwiseStepsTo(direction);
                     territory.Rotate(turns);
                 }
 
                 //Fine-tune the insertion spot so it fits right in.
                 var currentPos = territory.Anchor;
-                var planned = newPos.Subtract(currentPos);
-                if (i > 0) newPos = AdjustForInsertion(territory, planned, branch, dir, occupied, isSequence);
+                var planned = position.Subtract(currentPos);
+                if (i > 0) position = AdjustForInsertion(territory, planned, branch, direction, occupied, isSequence);
 
                 //Move the piece
-                var move = newPos.Subtract(currentPos);
+                var move = position.Subtract(currentPos);
                 var report = territory.Reposition(move);
 
                 //Keep track of occupied areas
@@ -465,6 +506,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 occupied.UnionWith(covered);
                 occupiedMax = occupied.Max;
 
+                //Reporting covered tiles
                 var cMaxY = covered.MaxBy(p => p.Y).Y;
                 var cMinY = covered.MinBy(p => p.Y).Y;
                 var cMaxX = covered.MaxBy(p => p.X).X;
@@ -475,11 +517,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 UpdateClusterMap(territory.Clusters, i);
 
                 //Prepare the next slots.
-                var nextSlots = NextSlotsHelix(territory, occupied, slot.add);
-                bool isSequential = sequentialDomains.Contains(territory.AssignedDomainId);
+                var nextSlots = NextSlotsHelix(territory, occupied, path);
+                //bool isSequential = sequentialDomains.Contains(territory.AssignedDomainId);
                 foreach (var (pos, add) in nextSlots)
                 {
-                    if (InBounds(pos) || isSequential) slots.Enqueue((pos, add));
+                    if (InBounds(pos) || isSequence) slots.Enqueue((pos, add));
                     else deferred.Enqueue((pos, add));
                 }
             }

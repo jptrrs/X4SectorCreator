@@ -38,9 +38,9 @@ namespace X4SectorCreator.Objects
 </components>";
 
         internal bool shuffled = false;
-        internal List<Sector> Destinations = new List<Sector>();
-        internal Dictionary<Sector, List<(Gate, Sector)>> Exits = new Dictionary<Sector, List<(Gate, Sector)>>();
-        internal List<int> BridgeFor = new List<int>();
+        internal List<Sector> Destinations = [];
+        internal Dictionary<Sector, List<(Gate, Sector)>> Exits = [];
+        internal List<int> BridgeFor = [];
         internal Point AnchorOffset = Point.Empty;
         private Point? plannedPosition;
 

@@ -7,19 +7,20 @@ namespace X4SectorCreator.Objects
     internal class Territory : ClusterCollection
     {
         internal Point Anchor = Point.Empty;
-        internal List<int> annexedIds = new List<int>();
+        internal List<int> annexedIds = [];
         internal int[] box = new int[4];
-        internal List<int> closeColonyIds = new List<int>();
-        internal List<int> connectedIds = new List<int>();
-        internal List<cPoint> contour = new List<cPoint>();
+        internal List<int> closeColonyIds = [];
+        internal List<int> connectedIds = [];
+        internal List<cPoint> contour = [];
         internal (double x, double y) Center;
         internal Point Corner = Point.Empty;
-        internal List<Sector> Destinations = new List<Sector>();
+        internal List<Sector> Destinations = [];
         internal string Dlc;
-        internal Dictionary<Sector, List<(Gate, Sector)>> Exits = new Dictionary<Sector, List<(Gate, Sector)>>();
-        internal List<Cluster> Frontiers = new List<Cluster>();
+        internal Dictionary<Sector, List<(Gate, Sector)>> Exits = [];
+        internal List<Cluster> Frontiers = [];
         internal int Id, AssignedDomainId;
         internal bool IsBridge = false;
+        internal bool? isVanilla;
         internal Cluster Seed;
         internal Point Size = Point.Empty;
         internal Direction EntryDirection;
@@ -98,6 +99,18 @@ namespace X4SectorCreator.Objects
                     }
                 }
                 SetUpDirection();
+            }
+        }
+
+        internal bool IsVanilla
+        {
+            get
+            {
+                if (isVanilla == null)
+                {
+                    isVanilla = Clusters.Any(x => string.IsNullOrWhiteSpace(x.Dlc));
+                }
+                return (bool) isVanilla;
             }
         }
 

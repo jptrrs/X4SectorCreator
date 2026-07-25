@@ -30,8 +30,8 @@
 
         public static string GetAddressAtDepth(this string path, int targetDepth)
         {
-            if (string.IsNullOrEmpty(path) || targetDepth <= 0) return "0"; // Returns the root address
-            if (targetDepth >= path.Length) return path;
+            //Will spit back the same string if fed with a null one, 0, or if the depth is invalid.
+            if (string.IsNullOrEmpty(path) || path == "0" || targetDepth <= 0 || targetDepth >= path.Length) return path;
             return path.Substring(0, targetDepth);
         }
 
