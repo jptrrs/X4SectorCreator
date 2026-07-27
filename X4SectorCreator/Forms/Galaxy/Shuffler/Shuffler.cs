@@ -447,7 +447,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         else
                         {
                             //end of the line
-                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots!", true);
+                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots! Staged domains left out: {$"{string.Join(", ",staged.Values.Select(x => $"[{string.Join(", ",x)}]"), true)}"}");
                         }
                     }
                 }
@@ -485,6 +485,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 //Move the piece
                 var move = position.Subtract(currentPos);
                 var report = territory.Reposition(move);
+                _ = Toolbox.LogAsync(level, report);
 
                 //Keep track of occupied areas
                 var covered = territory.Contour;
@@ -811,20 +812,30 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private void HandleMisplaced()
         {
             if (misplaced.Count == 0) return;
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{misplaced.Count} clusters were misplaced and will be set aside...", true);
             int y = 1;
             foreach (var c in misplaced)
             {
-                c.Position = occupiedMax.Add(new Point(gap, y * VertGap)).FitToHex();
-                y++;
+                StringBuilder log = new StringBuilder();
+                log.Append($"{c.Name}, from territory #{c.AssignedTerritoryId}-{territories[c.AssignedTerritoryId].seed.Name} couldn't be placed @ {c.Position.ToTuple()}... ");
                 if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{c.Name}, from territory #{c.AssignedTerritoryId}-{territories[c.AssignedTerritoryId].seed.Name}, placed @ ({c.Position.ToTuple()}).");
+                    log.Append("solved on a second try.");
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: couldn't place {c.Name}, territory #{c.AssignedTerritoryId}, anywhere! Last attempt: {c.Position.ToTuple()}.");
+                    var failed = c.Position; 
+                    c.Position = occupiedMax.Add(new Point(gap, y * VertGap)).FitToHex();
+                    y++;
+                    if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
+                    {
+                        log.Append($"pushed aside and placed @ {c.Position.ToTuple()}.");
+                    }
+                    else
+                    {
+                        log.Append($"ERROR: failure to push it aside. We couldn't place it anywhere! Last attempt: {c.Position.ToTuple()}.");
+                    }
                 }
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString(), true);
             }
         }
 
@@ -937,7 +948,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 staged[branch] = set.Value;
                 domains.Remove(set.Key);
             }
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Starting a new domain - [{string.Join(", ", set.Value)}]. Draw order will be {(newSequence ? "SEQUENTIAL" : "random")}. New branch is {branch}.", true);
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Starting a new domain - [{string.Join(", ", set.Value)}]. Draw order will be {(newSequence ? "SEQUENTIAL" : "random")}. Loaded to branch {branch}.", true);
             return branch;
         }
         private List<Point> ScanForCollisions(SortedSet<cPoint> occupied, Point position, int width, int height)
@@ -987,6 +998,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             return placed;
         }
+        
         private void UpdateClusterMap(List<Cluster> clusters, int errorY = 0)
         {
             foreach (var c in clusters)
@@ -998,6 +1010,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
             }
         }
+
         #endregion
     }
 }

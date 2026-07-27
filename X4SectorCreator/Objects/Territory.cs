@@ -117,14 +117,14 @@ namespace X4SectorCreator.Objects
         internal string Reposition(Point displacement)
         {
             anchor = anchor.Add(displacement);
-            List<string> list = new List<string>();
+            List<string> log = new List<string>();
             foreach (var cluster in Clusters)
             {
                 cluster.Position = anchor.Add(cluster.AnchorOffset);
                 cluster.shuffled = true;
-                list.Add($"{cluster.Name}({cluster.Position.ToTuple()})");
+                log.Add($"{cluster.Name} {cluster.Position.ToTuple()}");
             }
-            string report = $"\n{seed.Name} moved to {anchor.ToTuple()}: {string.Join(", ", list.ToArray())}";
+            string report = $"{seed.Name} moved to {anchor.ToTuple()}: {string.Join(", ", log.ToArray())}";
             return report;
         }
 
