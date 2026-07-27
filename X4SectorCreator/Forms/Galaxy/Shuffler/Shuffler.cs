@@ -462,7 +462,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 _ = Toolbox.LogAsync(level, $"Step {i}, branch {branch}, slot @ {position.ToTuple()}/{direction}/{path}", true);
                 if (valid)
                 {
-                    _ = Toolbox.LogAsync(level, $"Assigning #{territory.id}-{territory.seed.Name}, size=({territory.size.ToTuple()}, {territory.Clusters.Count} clusters");
+                    _ = Toolbox.LogAsync(level, $"Assigning #{territory.id} - {territory.seed.Name}, size={territory.size.ToTuple()},{territory.Clusters.Count} clusters");
                 }
                 else
                 {

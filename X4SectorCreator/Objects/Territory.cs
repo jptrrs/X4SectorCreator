@@ -124,19 +124,19 @@ namespace X4SectorCreator.Objects
                 cluster.shuffled = true;
                 log.Add($"{cluster.Name} {cluster.Position.ToTuple()}");
             }
-            string report = $"{seed.Name} moved to {anchor.ToTuple()}: {string.Join(", ", log.ToArray())}";
-            return report;
+            return $"Moving {Clusters.Count} clusters: {string.Join(", ", log.ToArray())}";
         }
 
         internal void Rotate(int turns)
         {
+            var oldcenter = center;
             foreach (var c in Clusters)
             {
                 c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, center.x, center.y, turns);
             }
             SetUpBox();
             List<string> afterRotate = Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{id}-{seed.Name} rotated {turns * 90}° (from {entryDirection})");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{id} - {seed.Name} rotated {turns * 90}° (from {entryDirection}, around {oldcenter.ToTuple()})");
         }
 
         internal void SetUpBox()
@@ -154,8 +154,8 @@ namespace X4SectorCreator.Objects
             anchor = corner.FitToHex();
             size = new Point(width, height);
             overhead = anchor.Y > box[3];
-            double centerX = anchor.X + (size.X - 1) / 2.0;
-            double centerY = anchor.Y - (size.Y - 2) / 2.0;
+            double centerX = corner.X + (width - 1) / 2.0;
+            double centerY = corner.Y - (height - 2) / 2.0;
             center = (centerX, centerY);
             SetUpClustersOffsets();
         }

@@ -67,7 +67,38 @@ namespace X4SectorCreator.Helpers
                 _ => throw new ArgumentException("turn parameter should be 1, 2 or 3.")
             };
 
-            return new Point((int)Math.Round(rx), (int)Math.Round(ry)).FitToHex();
+            return new Point((int)Math.Round(rx,MidpointRounding.AwayFromZero), (int)Math.Round(ry,MidpointRounding.AwayFromZero)).FitToHex();
+
+            //Aternative with finer control over rounding. It works, but vertical territories can get too spread out.
+
+            ////Round as needed, considering Hex grid.
+            //Point result = Point.Empty;
+            //bool XneedsRounding = rx % 1 != 0;
+            //bool YneedsRounding = ry % 1 != 0;
+            //if (!XneedsRounding && !YneedsRounding)
+            //{
+            //    //In that case, regular fitting logic will do.
+            //    result = new Point((int)rx, (int)ry).FitToHex();
+            //}
+            //else
+            //{
+            //    if (XneedsRounding && !YneedsRounding)
+            //    {
+            //        rx = ry % 2 == 0 ? rx = Math.Round(rx) : rx = Math.Round(rx - 1) + 1; // to round it to the nearest odd number
+            //        // -7,9 / -5,9
+            //    }
+            //    else if (YneedsRounding && !XneedsRounding)
+            //    {
+            //        ry = rx % 2 == 0 ? ry = Math.Round(ry) : ry = Math.Round(ry - 1.0) + 1; // to round it to the nearest odd number
+            //    }
+            //    else if (XneedsRounding && YneedsRounding)
+            //    {
+            //        rx = Math.Round(rx);
+            //        ry = Math.Round(ry);
+            //    }
+            //    result = new Point((int)rx, (int)ry);
+            //}
+            //return result;
         }
     }
 }

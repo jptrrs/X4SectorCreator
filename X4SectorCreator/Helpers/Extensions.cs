@@ -444,7 +444,7 @@ namespace X4SectorCreator.Helpers
             return (p.X, p.Y);
         }
 
-        // Snapping functionality so we don't have to worry about the weird coord system.
+        // Snapping functionality so we don't have to worry about the weird coord system. (to a certain point...)
         public static Point FitToHex(this Point target)
         {
             if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
@@ -453,31 +453,32 @@ namespace X4SectorCreator.Helpers
             }
             return target;
         }
-        public static Point FitToHex(this Point target, Direction bias = Direction.Up, bool supressLog = false)
-        {
-            var original = target;
-            if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
-            {
-                switch (bias)
-                {
-                    case Direction.Undefined:
-                    case Direction.Up:
-                        target.Y += 1;
-                        break;
-                    case Direction.Down:
-                        target.Y -= 1;
-                        break;
-                    case Direction.Right:
-                        target.X += 1;
-                        break;
-                    case Direction.Left:
-                        target.X -= 1;
-                        break;
-                }
-            }
-            if (!supressLog && (original != target)) File.AppendAllTextAsync("test.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [FitToHex] Moved {original.ToTuple()} {bias} to {target.ToTuple()}{Environment.NewLine}");
-            return target;
-        }
+
+        //public static Point FitToHex(this Point target, Direction bias = Direction.Up, bool supressLog = false)
+        //{
+        //    var original = target;
+        //    if ((target.X % 2 == 0 && target.Y % 2 != 0) || (target.X % 2 != 0 && target.Y % 2 == 0))
+        //    {
+        //        switch (bias)
+        //        {
+        //            case Direction.Undefined:
+        //            case Direction.Up:
+        //                target.Y += 1;
+        //                break;
+        //            case Direction.Down:
+        //                target.Y -= 1;
+        //                break;
+        //            case Direction.Right:
+        //                target.X += 1;
+        //                break;
+        //            case Direction.Left:
+        //                target.X -= 1;
+        //                break;
+        //        }
+        //    }
+        //    if (!supressLog && (original != target)) File.AppendAllTextAsync("test.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [FitToHex] Moved {original.ToTuple()} {bias} to {target.ToTuple()}{Environment.NewLine}");
+        //    return target;
+        //}
 
         public static Point WiggleToFit(this Point target, SortedSet<cPoint> occupied)
         {
