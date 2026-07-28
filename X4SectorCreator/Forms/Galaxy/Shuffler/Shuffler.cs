@@ -27,7 +27,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         };
         private Dictionary<int, List<int>> domains = [];
         private int helixGeneration = 1;
-        private Direction helixLastBranch = Direction.Up;
         private Func<Point, bool> InBounds = p =>
                 {
                     var absX = Math.Abs(p.X);
@@ -317,7 +316,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var t in territories.Values)
             {
                 var owner = t.seed.Sectors[0].IsNeutral ? "Neutral" : t.seed.Sectors[0].Owner;
-                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.frontiers.Count} connecting, entry from {t.entryDirection}");
+                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.frontiers.Count} connecting, facing {t.exitDirection}");
                 if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 if (t.isBridge) log.Append($"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].id}-{territories[y].seed.Name}"))}");
                 if (t.closeColonyIds.Count > 0) log.Append($"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
@@ -471,10 +470,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
 
                 //Rotate it as needed.
-                if (direction != Direction.Undefined && territory.entryDirection != Direction.Undefined && territory.entryDirection != direction)
+                if (direction != Direction.Undefined && territory.exitDirection != Direction.Undefined)
                 {
-                    var turns = territory.entryDirection.ClockwiseStepsTo(direction);
-                    territory.Rotate(turns);
+                    var entryDirection = territory.exitDirection.OppositeDir();
+                    if (entryDirection != direction)
+                    {
+                        var turns = entryDirection.ClockwiseStepsTo(direction);
+                        territory.Rotate(turns);
+                    }
                 }
 
                 //Fine-tune the insertion spot so it fits right in.
@@ -620,7 +623,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             else if (!flushed)
             {
                 //Look for a gap against the parent and move to close it, as needed.
-                if (TryToPushAround(offset, dir.OppositeDir(), Direction.Undefined, occupied, width, height, 5, ref adjust))
+                if (TryToPushAround(offset, dir.OppositeDir(), Direction.Undefined, occupied, width, height, width, ref adjust))
                 {
                     offset = offset.Add(adjust);
                     attracted = true;
@@ -860,8 +863,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private List<(Point position, string address)> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, string parentAddress)
         {
             var branch = parentAddress.GetMainBranch();
+            var lastDir = parentAddress.GetDirection();
             bool firstRun = branch == Direction.Undefined;
-            bool quadrant = branch != helixLastBranch;
+            bool quadrant = branch == lastDir;
             bool cycle = quadrant && branch == Direction.Right;
             var ax = territory.anchor.X;
             var ay = territory.anchor.Y;
@@ -919,9 +923,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             _ = Toolbox.LogAsync(level, $"Slots around #{territory.id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
 
-            //House keeping
-            helixLastBranch = branch;
-
             return slots.ToList();
         }
 
@@ -965,40 +966,36 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private bool TryToPushAround(Point position, Direction primaryDir, Direction secondaryDir, SortedSet<cPoint> occupied, int width, int height, int maxPush, ref Point vector)
         {
             if (primaryDir == Direction.Undefined) return false;
-            bool placed = false;
             bool singleTile = width <= 1 && height <= 2;
             for (int i = 1; i < maxPush; i++)
             {
-                bool sucess = false;
-                Point target = Point.Empty;
-                Direction chosenDir = new Direction();
+                // Try primary direction
                 Point forced1 = MoveIntoDirection(primaryDir, position, i);
-                if (singleTile && !occupied.Contains(forced1) || !SimpleCollision(occupied, forced1, width, height))
+                if (IsValidPlacement(forced1, singleTile, occupied, width, height))
                 {
-                    sucess = true;
-                    target = forced1;
-                    chosenDir = primaryDir;
+                    vector = forced1.Subtract(position);
+                    return true;
                 }
-                else if (secondaryDir != Direction.Undefined)
+
+                // Try secondary direction if available
+                if (secondaryDir != Direction.Undefined)
                 {
                     Point forced2 = MoveIntoDirection(secondaryDir, position, i);
-                    if (singleTile && !occupied.Contains(forced2) || !SimpleCollision(occupied, forced2, width, height))
+                    if (IsValidPlacement(forced2, singleTile, occupied, width, height))
                     {
-                        sucess = true;
-                        target = forced2;
-                        chosenDir = secondaryDir;
+                        vector = forced2.Subtract(position);
+                        return true;
                     }
                 }
-                if (sucess)
-                {
-                    placed = true;
-                    vector = target.Subtract(position);
-                    break;
-                }
             }
-            return placed;
+            return false;
         }
-        
+
+        private bool IsValidPlacement(Point position, bool singleTile, SortedSet<cPoint> occupied, int width, int height)
+        {
+            return singleTile ? !occupied.Contains(position) : !SimpleCollision(occupied, position, width, height);
+        }
+
         private void UpdateClusterMap(List<Cluster> clusters, int errorY = 0)
         {
             foreach (var c in clusters)

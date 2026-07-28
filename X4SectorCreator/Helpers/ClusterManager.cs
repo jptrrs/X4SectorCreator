@@ -52,53 +52,60 @@ namespace X4SectorCreator.Helpers
             return (cols, rows);
         }
 
-        public static Point RotateOrtho(Point current, double cx, double cy, int turns)
+        public static Point PivotForRotation(Point pos)
         {
-            // Translate point relative to the center origin
-            double dx = current.X - cx;
-            double dy = current.Y - cy;
-
-            (double rx, double ry) = turns switch
+            if (pos.X % 2 != 0 && pos.Y % 2 != 0)
             {
-                1 => (cx + dy / 2, cy - 2 * dx), // 90° Clockwise
-                2 => (cx - dx, cy - dy), // 180° Rotation (Inversion)
-                3 => (cx - dy / 2, cy + 2 * dx), // 270° Clockwise
-                0 => (current.X, current.Y), // No rotation
-                _ => throw new ArgumentException("turn parameter should be 1, 2 or 3.")
-            };
-
-            return new Point((int)Math.Round(rx,MidpointRounding.AwayFromZero), (int)Math.Round(ry,MidpointRounding.AwayFromZero)).FitToHex();
-
-            //Aternative with finer control over rounding. It works, but vertical territories can get too spread out.
-
-            ////Round as needed, considering Hex grid.
-            //Point result = Point.Empty;
-            //bool XneedsRounding = rx % 1 != 0;
-            //bool YneedsRounding = ry % 1 != 0;
-            //if (!XneedsRounding && !YneedsRounding)
-            //{
-            //    //In that case, regular fitting logic will do.
-            //    result = new Point((int)rx, (int)ry).FitToHex();
-            //}
-            //else
-            //{
-            //    if (XneedsRounding && !YneedsRounding)
-            //    {
-            //        rx = ry % 2 == 0 ? rx = Math.Round(rx) : rx = Math.Round(rx - 1) + 1; // to round it to the nearest odd number
-            //        // -7,9 / -5,9
-            //    }
-            //    else if (YneedsRounding && !XneedsRounding)
-            //    {
-            //        ry = rx % 2 == 0 ? ry = Math.Round(ry) : ry = Math.Round(ry - 1.0) + 1; // to round it to the nearest odd number
-            //    }
-            //    else if (XneedsRounding && YneedsRounding)
-            //    {
-            //        rx = Math.Round(rx);
-            //        ry = Math.Round(ry);
-            //    }
-            //    result = new Point((int)rx, (int)ry);
-            //}
-            //return result;
+                return new Point(pos.X + 1, pos.Y + 1);
+            }
+            return pos;
         }
+
+        public static Point RotateOrtho(Point current, Point pivot, int turns)
+        {
+            if (turns <= 0 || turns > 3) return current; //No rotation
+            pivot = PivotForRotation(pivot);
+            double dx = current.X - pivot.X;
+            double dy = current.Y - pivot.Y;
+            (double x, double y) rotated = (0d,0d);
+            if (turns == 2) //180° Rotation
+            {
+                rotated = (pivot.X - dx, pivot.Y - dy);
+            }
+            else
+            {
+                //de-stagger every other column
+                if (current.X % 2 != 0) dy -= 1;
+                if (turns == 1) // 90° Clockwise
+                {
+                    rotated = (pivot.X + dy / 2, pivot.Y - 2 * dx);
+                }
+                else //turns = 3, 270° Clockwise
+                {
+                    rotated = (pivot.X - dy / 2, pivot.Y + 2 * dx);
+                }
+                //re-stagger every other column
+                if (rotated.x % 2 != 0) rotated.y += 1;
+            }
+            return new Point((int)Math.Round(rotated.x, MidpointRounding.AwayFromZero), (int)Math.Round(rotated.y, MidpointRounding.AwayFromZero));
+        }
+
+        //public static Point RotateOrtho(Point current, double cx, double cy, int turns)
+        //{
+        //    // Translate point relative to the center origin
+        //    double dx = current.X - cx;
+        //    double dy = current.Y - cy;
+
+        //    (double rx, double ry) = turns switch
+        //    {
+        //        1 => (cx + dy / 2, cy - 2 * dx), // 90° Clockwise
+        //        2 => (cx - dx, cy - dy), // 180° Rotation (Inversion)
+        //        3 => (cx - dy / 2, cy + 2 * dx), // 270° Clockwise
+        //        0 => (current.X, current.Y), // No rotation
+        //        _ => throw new ArgumentException("turn parameter should be 1, 2 or 3.")
+        //    };
+
+        //    return new Point((int)Math.Round(rx, MidpointRounding.AwayFromZero), (int)Math.Round(ry, MidpointRounding.AwayFromZero)).FitToHex();
+        //}
     }
 }

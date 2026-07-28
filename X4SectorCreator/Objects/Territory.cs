@@ -11,7 +11,7 @@ namespace X4SectorCreator.Objects
         internal List<int> closeColonyIds = [];
         internal List<cPoint> contour = [];
         internal string dlc;
-        internal Direction entryDirection;
+        internal Direction exitDirection;
         internal List<Cluster> frontiers = [];
         internal int id, assignedDomainId;
         internal bool isBridge = false;
@@ -129,14 +129,13 @@ namespace X4SectorCreator.Objects
 
         internal void Rotate(int turns)
         {
-            var oldcenter = center;
             foreach (var c in Clusters)
             {
-                c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, center.x, center.y, turns);
+                c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, anchor, turns);
             }
             SetUpBox();
             List<string> afterRotate = Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{id} - {seed.Name} rotated {turns * 90}° (from {entryDirection}, around {oldcenter.ToTuple()})");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{id} - {seed.Name} rotated {turns * 90}°");
         }
 
         internal void SetUpBox()
@@ -174,32 +173,33 @@ namespace X4SectorCreator.Objects
             Direction exitDir = Direction.Undefined;
             if (size.X <= 1 && size.Y <= 2)
             {
-                entryDirection = exitDir;
+                exitDirection = exitDir;
                 return;
             }
             int voteUp = 0;
             int voteDown = 0;
             int voteRight = 0;
             int voteLeft = 0;
-            var outbound = frontiers.Where(c => c.Destinations.Any(s => !peers.Contains(s.AssignedTerritoryId)));
             List<Cluster> accountedFor = [];
-            foreach (var c in outbound)
+            bool landLocked = destinations.Select(s => s.FindCluster()).All(c => peers.Contains(c.AssignedTerritoryId));
+            var relevant = frontiers.Where(c => c.Destinations.Any(s => peers.Contains(s.AssignedTerritoryId) == landLocked));
+            foreach (var c in relevant)
             {
                 //Cluster position relative to its territory
                 if (c.Position.X < center.x) voteLeft++;
                 else if (c.Position.X > center.x) voteRight++;
                 if (c.Position.Y > center.y) voteUp++;
                 else if (c.Position.Y < center.y) voteDown++;
-                
+
                 //Destinations relative cluster position
                 //The more destinations from a cluster, bigger weight given to this.
                 foreach (var s in c.Destinations)
                 {
-                    if (peers.Contains(s.AssignedTerritoryId)) continue;
+                    if (peers.Contains(s.AssignedTerritoryId) != landLocked) continue;
                     var d = s.FindCluster();
                     if (accountedFor.Contains(d)) continue; //so we don't double-count
                     if (c.Position.X < d.Position.X) voteRight++;
-                    else if(c. Position.X > d.Position.X) voteLeft++;
+                    else if (c.Position.X > d.Position.X) voteLeft++;
                     if (c.Position.Y > d.Position.Y) voteDown++;
                     else if (c.Position.Y < d.Position.Y) voteUp++;
                     accountedFor.Add(d);
@@ -226,7 +226,7 @@ namespace X4SectorCreator.Objects
                 if (goV > goH) exitDir = vOption;
                 else exitDir = hOption;
             }
-            entryDirection = exitDir.OppositeDir();
+            exitDirection = exitDir;
         }
     }
 }
