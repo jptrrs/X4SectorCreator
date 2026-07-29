@@ -85,7 +85,7 @@ namespace X4SectorCreator.Helpers
                     rotated = (pivot.X - dy / 2, pivot.Y + 2 * dx);
                 }
                 //re-stagger every other column
-                if (rotated.x % 2 != 0) rotated.y += 1;
+                if (rotated.x % 2 != 0) rotated.y -= 1;
             }
             return new Point((int)Math.Round(rotated.x, MidpointRounding.AwayFromZero), (int)Math.Round(rotated.y, MidpointRounding.AwayFromZero));
         }
