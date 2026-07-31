@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Diagnostics.Metrics;
 using System.Drawing.Drawing2D;
 using X4SectorCreator.Forms;
 using X4SectorCreator.Helpers;
@@ -858,7 +859,7 @@ namespace X4SectorCreator
                 _ = MessageBox.Show("An error occured when trying to render the map view: \"" + ex.Message + "\".\nPlease create a bug report. (Be sure to provide the export xml or exact reproduction steps).");
                 Close();
 #endif
-            }
+        }
         }
 
         private readonly Dictionary<Color, SolidBrush> _brushColorCache = [];
@@ -1713,87 +1714,17 @@ namespace X4SectorCreator
 
         private static Color GetClusterOwnershipColor(Cluster cluster)
         {
-            var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var sector in cluster.Sectors)
-            {
-                if (sector == null) return MainForm.Instance.FactionColorMapping["None"];
-
-                HashSet<string> factions = sector.Zones
-                    .Where(a => !a.IsBaseGame)
-                    .SelectMany(a => a.Stations)
-                    .Select(a => a.Owner)
-                    .Where(a => !string.IsNullOrWhiteSpace(a))
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                if (sector.IsBaseGame)
-                {
-                    if (sector.Owner.Equals("None", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (factions.Count == 1)
-                        {
-                            ownerships.Add(factions.First());
-                        }
-                        else
-                        {
-                            ownerships.Add(sector.Owner);
-                        }
-                    }
-                    else
-                    {
-                        if (factions.Count == 0 || (factions.Count == 1 && factions.First().Equals(sector.Owner, StringComparison.OrdinalIgnoreCase)))
-                            ownerships.Add(sector.Owner);
-                    }
-                }
-                else
-                {
-                    if (factions.Count == 1)
-                    {
-                        ownerships.Add(factions.First());
-                    }
-                }
-            }
-
-            if (ownerships.Count == 1)
-                return FactionsForm.GetColorForFaction(ownerships.First());
-            return MainForm.Instance.FactionColorMapping["None"];
+            //Offloaded to the sector class so we can repurpose it. Also, this simplifies it a lot.
+            var ownership = cluster.GetOwnerShip();
+            return ownership.Length > 0 ? FactionsForm.GetColorForFaction(ownership) : MainForm.Instance.FactionColorMapping["None"];
         }
 
         private static Color GetSectorOwnershipColor(Sector sector)
         {
+            //Offloaded to the sector class so we can repurpose it. Also, this simplifies it a lot.
             if (sector == null) return MainForm.Instance.FactionColorMapping["None"];
-
-            HashSet<string> factions = sector.Zones
-                .Where(a => !a.IsBaseGame)
-                .SelectMany(a => a.Stations)
-                .Select(a => a.Faction)
-                .Where(a => a != null)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            var color = MainForm.Instance.FactionColorMapping["None"];
-            if (sector.IsBaseGame)
-            {
-                if (sector.Owner.Equals("None", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (factions.Count == 1)
-                    {
-                        color = FactionsForm.GetColorForFaction(factions.First());
-                    }
-                }
-                else
-                {
-                    if (factions.Count == 0 || (factions.Count == 1 && factions.First().Equals(sector.Owner, StringComparison.OrdinalIgnoreCase)))
-                        color = FactionsForm.GetColorForFaction(sector.Owner);
-                }
-            }
-            else
-            {
-                if (factions.Count == 1)
-                {
-                    color = FactionsForm.GetColorForFaction(factions.First());
-                }
-            }
-
-            return color;
+            var ownership = sector.CurrentOwner;
+            return ownership.Length > 0 ? FactionsForm.GetColorForFaction(ownership) : MainForm.Instance.FactionColorMapping["None"];
         }
 
         private void RenderClusters(PaintEventArgs e, KeyValuePair<(int, int), Hexagon> hex, out bool invalid)

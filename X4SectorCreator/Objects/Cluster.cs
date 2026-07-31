@@ -187,6 +187,16 @@ namespace X4SectorCreator.Objects
             return result;
         }
 
+        internal string GetOwnerShip()
+        {
+            var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var sector in Sectors)
+            {
+                ownerships.Add(sector.CurrentOwner);
+            }
+            return ownerships != null && ownerships.Count == 1 ? ownerships.First() : "";
+        }
+
         internal List<cPoint> Contour
         {
             get

@@ -238,10 +238,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     if (foundId > 0)
                     {
                         if (territory.annexedIds.Contains(foundId)) continue;
-                        if (origin.Owner != null &&
+                        var owner = origin.CurrentOwner;
+                        if (owner != null &&
                             !origin.IsNeutral &&
-                            origin.Owner.Equals(destination.Owner, StringComparison.Ordinal) &&
-                            !origin.Owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
+                            owner.Equals(destination.CurrentOwner, StringComparison.Ordinal) &&
+                            !owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
                         {
                             territory.annexedIds.AddUnique(foundId);
                             territories[foundId].annexedIds.AddUnique(territory.id);
@@ -262,8 +263,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var cluster in candidates)
             {
                 var connected = cluster.Destinations
-                    .Where(s => !s.IsNeutral && !s.Owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
-                    .GroupBy(s => s.Owner)
+                    .Where(s => !s.IsNeutral && !s.CurrentOwner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(s => s.CurrentOwner)
                     .Where(g => g.Count() > 1)
                     .Select(g => g.Select(s => territories[s.AssignedTerritoryId]))
                     .ToList();
@@ -312,10 +313,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private void TerritoriesReport()
         {
             var log = new StringBuilder();
-            log.AppendLine($"\n\n--- Territories ---\n\n");
+            log.AppendLine($"\n\n--- Territories ---\n");
             foreach (var t in territories.Values)
             {
-                var owner = t.seed.Sectors[0].IsNeutral ? "Neutral" : t.seed.Sectors[0].Owner;
+                var owner = t.seed.Sectors[0].IsNeutral ? "Neutral" : t.seed.Sectors[0].CurrentOwner;
                 log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.frontiers.Count} connecting, facing {t.exitDirection}");
                 if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 if (t.isBridge) log.Append($"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].id}-{territories[y].seed.Name}"))}");

@@ -21,6 +21,40 @@ namespace X4SectorCreator.Objects
         public List<Resource> ResourceAreas { get; set; } = [];
         public SectorPlacement Placement { get; set; }
 
+        private string currentOwner;
+
+        [JsonIgnore]
+        internal string CurrentOwner
+        {
+            get
+            {
+                if (currentOwner == null)
+                {
+                    HashSet<string> factions = Zones
+                        .Where(a => !a.IsBaseGame)
+                        .SelectMany(a => a.Stations)
+                        .Select(a => a.Owner)
+                        .Where(a => !string.IsNullOrWhiteSpace(a))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    string result = "";
+                    string fallback = IsBaseGame ? Owner : "";
+                    string faction = factions.Count == 1 ? factions.First() : fallback;
+                    if (!IsBaseGame || Owner.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result = faction;
+                    }
+                    else if (factions.Count == 0 || faction.Equals(Owner, StringComparison.OrdinalIgnoreCase)) //results in an empty string if inferred owner conflicts with the base game's.
+                    {
+                        result = Owner;
+                    }
+                    currentOwner = result;
+
+                }
+                return currentOwner;
+            }
+        }
+
         [JsonIgnore]
         public int AssignedTerritoryId = -1;
 
@@ -177,6 +211,4 @@ namespace X4SectorCreator.Objects
         MiddleTop,
         MiddleBottom,
     }
-
-
 }
