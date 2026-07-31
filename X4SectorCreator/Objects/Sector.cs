@@ -71,7 +71,7 @@ namespace X4SectorCreator.Objects
         public bool IsBaseGame => !string.IsNullOrWhiteSpace(BaseGameMapping);
 
         [JsonIgnore]
-        public bool IsNeutral => Owner == null || Owner.Equals("None", StringComparison.Ordinal);
+        public bool IsNeutral =>  string.IsNullOrEmpty(CurrentOwner) || CurrentOwner.Equals("None", StringComparison.OrdinalIgnoreCase);
         
         private Point DeterminePlacementDirection()
         {
