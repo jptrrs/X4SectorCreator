@@ -114,7 +114,9 @@ namespace X4SectorCreator.Objects
                 Source = Source,
                 SourcePath = SourcePath,
                 Type = Type,
-                Yaw = Yaw
+                Yaw = Yaw,
+                ParentZone = ParentZone,
+                ParentSector = ParentSector
             };
         }
 
@@ -145,5 +147,42 @@ namespace X4SectorCreator.Objects
             cluster = Pcluster;
             return result;
         }
+
+        [JsonIgnore]
+        internal Zone ParentZone
+        {
+            get
+            {
+                if (parentZone == null)
+                {
+                    parentZone = ParentSector?.Zones?.Find(z => z.Gates.Contains(this));
+                }
+                return parentZone;
+            }
+            set
+            {
+                parentZone = value;
+            }
+        }
+
+        [JsonIgnore]
+        internal Sector ParentSector
+        {
+            get
+            {
+                if (parentSector == null)
+                {
+                    parentSector = MainForm.Instance.AllClusters.Values.SelectMany(c => c.Sectors).First(x => x.Name.Equals(ParentSectorName, StringComparison.OrdinalIgnoreCase));
+                }
+                return parentSector;
+            }
+            set
+            {
+                parentSector = value;
+            }
+        }
+
+        internal Zone parentZone;
+        internal Sector parentSector;
     }
 }

@@ -12,7 +12,7 @@ namespace X4SectorCreator.Objects
         internal List<cPoint> contour = [];
         internal string dlc;
         internal Direction exitDirection;
-        internal List<Cluster> frontiers = [];
+        internal List<Cluster> bordering = [];
         internal int id, assignedDomainId;
         internal bool isBridge = false;
         internal bool? isVanilla;
@@ -22,8 +22,9 @@ namespace X4SectorCreator.Objects
         private int[] box = new int[4];
 
         private (double x, double y) center;
-        private List<Sector> destinations = [];
-        private Dictionary<Sector, List<(Gate gate, Sector sector)>> exits = [];
+        private HashSet<Cluster> exitClusters = [];
+        private List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> connections = [];       
+        
         private bool overhead = false;
 
         internal Territory(Cluster seed, int lastID)
@@ -57,46 +58,64 @@ namespace X4SectorCreator.Objects
         /// <param name="origin">The specific sector qhere the gate departs from.</param>
         /// <param name="gate">The gate itself.</param>
         /// <param name="destination">The sector it connects to.</param>
-        internal List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> ExitPoints
+        internal List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> Connections
         {
             get
             {
-                var roads = new List<(Cluster, Sector, Gate, Sector)>();
-                foreach (var cluster in frontiers)
+                if (connections.Count == 0)
                 {
-                    foreach (var sector in exits.Keys)
-                    {
-                        foreach (var exit in exits[sector])
-                        {
-                            roads.Add((cluster, sector, exit.gate, exit.sector));
-                        }
-                    }
+                    connections = bordering.SelectMany(c => c.Exits.SelectMany(s => s.Destinations.Select(e => (c, s, e.Value, e.Key))))
+                    .ToList();
                 }
-                return roads;
+                return connections;
             }
             set
             {
-                frontiers.Clear();
-                exits.Clear();
-                destinations.Clear();
+                bordering.Clear();
+                connections.Clear();
                 foreach (var item in value)
                 {
                     if (item.cluster == null || item.origin == null || item.gate == null || item.destination == null) continue;
-                    var cluster = item.Item1;
-                    var sector = item.Item2;
-                    var gate = item.Item3;
-                    var dest = item.Item4;
-                    frontiers.AddUnique(cluster);
-                    destinations.AddUnique(dest);
-                    if (exits.ContainsKey(sector))
+                    var cluster = item.cluster;
+                    var sector = item.origin;
+                    var gate = item.gate;
+                    var dest = item.destination;
+                    bordering.AddUnique(cluster);
+                    connections.Add((cluster, sector, gate, dest));
+                }
+            }
+        }
+
+        internal IEnumerable<(Cluster cluster, Sector origin, Gate gate, Sector destination)> ExitConnections
+        {
+            get
+            {
+                if (Connections.Count == 0) return null;
+                return Connections.Where(x => !peers.Contains(x.destination.AssignedTerritoryId));
+            }
+        }
+
+        internal HashSet<Cluster> ExitClusters
+        {
+            get
+            {
+                if (exitClusters.Count == 0)
+                {
+                    var exits = ExitConnections;
+                    if (exits != null)
                     {
-                        exits[sector].AddUnique((gate, dest));
-                    }
-                    else
-                    {
-                        exits.Add(sector, new List<(Gate, Sector)> { (gate, dest) });
+                        exitClusters = ExitConnections?.Select(x => x.cluster).ToHashSet();
                     }
                 }
+                return exitClusters;
+            }
+        }
+
+        internal HashSet<Gate> ExitGates
+        {
+            get
+            {
+                return ExitConnections?.Select(x => x.gate).ToHashSet();
             }
         }
 
@@ -181,8 +200,8 @@ namespace X4SectorCreator.Objects
             int voteRight = 0;
             int voteLeft = 0;
             List<Cluster> accountedFor = [];
-            bool landLocked = destinations.Select(s => s.FindCluster()).All(c => peers.Contains(c.AssignedTerritoryId));
-            var relevant = frontiers.Where(c => c.Destinations.Any(s => peers.Contains(s.AssignedTerritoryId) == landLocked));
+            bool landLocked = ExitClusters == null || ExitClusters.Count == 0;
+            var relevant = bordering.Where(c => c.Destinations.Any(s => peers.Contains(s.AssignedTerritoryId) == landLocked));
             foreach (var c in relevant)
             {
                 //Cluster position relative to its territory

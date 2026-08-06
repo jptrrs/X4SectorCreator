@@ -39,7 +39,7 @@ namespace X4SectorCreator.Objects
 
         internal bool shuffled = false;
         internal List<Sector> Destinations = [];
-        internal Dictionary<Sector, List<(Gate, Sector)>> Exits = [];
+        internal List<Sector> Exits = [];
         internal List<int> BridgeFor = [];
         internal Point AnchorOffset = Point.Empty;
         private Point? plannedPosition;
@@ -95,11 +95,11 @@ namespace X4SectorCreator.Objects
             get
             {
                 var roads = new List<(Sector, Gate, Sector)>();
-                foreach (var sector in Exits.Keys)
+                foreach (var sector in Exits)
                 {
-                    foreach (var exit in Exits[sector])
+                    foreach (var exit in sector.Destinations)
                     {
-                        roads.Add((sector, exit.Item1, exit.Item2));
+                        roads.Add((sector, exit.Value, exit.Key));
                     }
                 }
                 return roads;
@@ -110,14 +110,13 @@ namespace X4SectorCreator.Objects
                 Destinations.Clear();
                 foreach (var item in value)
                 {
-                    if (item.Item1 == null || item.Item2 == null || item.Item3 == null) continue;
-                    var sector = item.Item1;
-                    var gate = item.Item2;
-                    var dest = item.Item3;
+                    if (item.origin == null || item.gate == null || item.destination == null) continue;
+                    var sector = item.origin;
+                    var gate = item.gate;
+                    var dest = item.destination;
                     Destinations.AddUnique(dest);
-                    if (Exits.ContainsKey(sector))
-                    {
-                        Exits[sector].AddUnique((gate, dest));
+                    Exits.AddUnique(sector);
+                    sector.Destinations.Add(dest, gate);
                     }
                     else
                     {

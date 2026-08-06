@@ -22,6 +22,7 @@ namespace X4SectorCreator.Objects
         public SectorPlacement Placement { get; set; }
 
         private string currentOwner;
+        internal Dictionary<Sector, Gate> Destinations = new Dictionary<Sector, Gate>();
 
         [JsonIgnore]
         internal string CurrentOwner

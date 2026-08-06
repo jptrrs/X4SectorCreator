@@ -1,9 +1,10 @@
 ﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
+using X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgorithms;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
-using static X4SectorCreator.Objects.Constructionplan;
 
 namespace X4SectorCreator.Forms.Galaxy.Shuffler
 {
@@ -49,7 +50,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             // Gather some basic info
             hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
-            _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}");
+            _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}", true);
             // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
             // Map connections for all clusters and register entry points for territories
@@ -64,8 +65,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             TerritoriesReport();
             // Shuffle!
             Shuffle();
+            //
+            Reconnect();
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
+
         }
         
         internal static int VertGap => gap * 2;
@@ -112,7 +116,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         };
 
         private Action<Cluster, bool> SortTerritory => (cluster, reset) =>
-                {
+        {
             if (reset)
             {
                 var newTerritory = new Territory(cluster, territories.Count);
@@ -123,11 +127,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var territory = territories.Last().Value;
             territory.Clusters.Add(cluster);
             cluster.AssignedTerritoryId = territory.id;
+
         };
+
         private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
             var ordered = clusters.OrderBy(x => x.Position.DistanceSquaredOnHexGrid(Point.Empty)).ToList();
-            Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, x => DLCMatch(x), x => AreConnected(x));
+            Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, null/*x => DLCMatch(x)*/, x => AreConnected(x));
             foreach (var territory in territories.Values)
             {
                 territory.SetUpBox();
@@ -229,8 +235,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             foreach (var territory in territories.Values)
             {
-                if (territory.ExitPoints?.Count == 0) continue;
-                foreach (var entry in territory.ExitPoints)
+                if (territory.Connections?.Count == 0) continue;
+                foreach (var entry in territory.Connections)
                 {
                     var origin = entry.origin;
                     var destination = entry.destination;
@@ -257,8 +263,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private void FindCloseColonies()
         {
             var candidates = territories.Values
-                .SelectMany(t => t.frontiers)
-                .Where(c => c.ExitPoints?.Count > 1 && c.Exits.Keys.All(s => s.IsNeutral))
+                .SelectMany(t => t.bordering)
+                .Where(c => c.ExitPoints?.Count > 1 && c.Exits.All(s => s.IsNeutral))
                 .ToList();
             foreach (var cluster in candidates)
             {
@@ -299,7 +305,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         roads.Add((cluster, exit.origin, exit.gate, exit.destination));
                     }
                 }
-                territory.ExitPoints = roads;
+                territory.Connections = roads;
             }
         }
         
@@ -317,7 +323,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var t in territories.Values)
             {
                 var owner = t.seed.Sectors[0].IsNeutral ? "Neutral" : t.seed.Sectors[0].CurrentOwner;
-                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.frontiers.Count} connecting, facing {t.exitDirection}");
+                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}");
                 if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 if (t.isBridge) log.Append($"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].id}-{territories[y].seed.Name}"))}");
                 if (t.closeColonyIds.Count > 0) log.Append($"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
@@ -792,19 +798,19 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 case Direction.Right: //Above: move right then down
                     if (position.X > 0) yaw = moveY;
-                    return new Point(moveX, -yaw)/*.FitToHex(Direction.Down)*/;
+                    return new Point(moveX, -yaw);
 
                 case Direction.Left: //Below: move left then up
                     if (position.X < 0) yaw = moveY;
-                    return new Point(-moveX, yaw)/*.FitToHex()*/;
+                    return new Point(-moveX, yaw);
 
                 case Direction.Down: //Right: move down then left
                     if (position.Y < 0) yaw = moveX;
-                    return new Point(-yaw, -moveY)/*.FitToHex(Direction.Down)*/;
+                    return new Point(-yaw, -moveY);
 
                 case Direction.Up: //Left: move up then right
                     if (position.Y > 0) yaw = moveX;
-                    return new Point(yaw, moveY)/*.FitToHex()*/;
+                    return new Point(yaw, moveY);
 
                 case Direction.Undefined:
                     goto Fail;
@@ -1007,6 +1013,34 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     misplaced.Add(c);
                 }
             }
+        }
+
+        #endregion
+
+        #region Reconnections
+
+        internal void Reconnect()
+        {
+            var settings = new ProceduralSettings
+            {
+                Seed = Localisation.GetFnvHash("avatar"),
+                MinGatesPerSector = 1,
+                MaxGatesPerSector = 2,
+                GateMultiChancePerSector = 15
+            };
+            List<Cluster> clusters = [];
+            foreach (var territory in territories.Values)
+            {
+                if (territory.ExitGates == null) continue;
+                foreach (var gate in territory.ExitGates)
+                {
+                    var zone = gate.ParentZone;
+                    zone.Gates.Remove(gate);
+                }
+                clusters.AddRange(territory.ExitClusters);
+            }
+            var mst = new GateBuilderMST(settings);
+            mst.Generate(clusters);
         }
 
         #endregion

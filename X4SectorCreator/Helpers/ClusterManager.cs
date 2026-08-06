@@ -9,12 +9,12 @@ namespace X4SectorCreator.Helpers
             var result = new List<(Cluster, Sector, Gate, Sector)>();
             foreach (Cluster cluster in items)
             {
-                result.AddRange(PickDestinationsFromCluster(cluster).Select(x => (cluster, x.Item1, x.Item2, x.Item3)));
+                result.AddRange(PickDestinationsFromCluster(cluster).Select(x => (cluster, x.origin, x.gate, x.destination)));
             }
             return result;
         }
 
-        internal static List<(Sector, Gate, Sector)> PickDestinationsFromCluster(Cluster cluster, Predicate<Cluster> filter = null)
+        internal static List<(Sector origin, Gate gate, Sector destination)> PickDestinationsFromCluster(Cluster cluster, Predicate<Cluster> filter = null)
         {
             var result = new List<(Sector, Gate, Sector)>();
             if (cluster.Sectors?.Count == 0) return result;

@@ -670,7 +670,9 @@ namespace X4SectorCreator.Forms
                     Gate.GateType.props_gates_anc_gate_macro : Gate.GateType.props_gates_orb_accelerator_01_macro,
                 Yaw = int.Parse(txtTargetGateYaw.Text),
                 Pitch = int.Parse(txtTargetGatePitch.Text),
-                Roll = int.Parse(txtTargetGateRoll.Text)
+                Roll = int.Parse(txtTargetGateRoll.Text),
+                //Pluging in a couple extra fields to facilitate future operations
+                ParentSector = targetSector
             };
 
             // Create new target zone
@@ -680,6 +682,7 @@ namespace X4SectorCreator.Forms
                 Position = new Point(GatePosX, GatePosY),
                 Gates = [targetGate]
             };
+            targetGate.ParentZone = targetZone;
             targetSector.Zones.Add(targetZone);
             #endregion
 

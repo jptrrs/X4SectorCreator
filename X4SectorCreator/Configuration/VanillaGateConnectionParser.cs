@@ -219,7 +219,10 @@ namespace X4SectorCreator.Configuration
                 Roll = zoneGateInfo.Rotation?.X ?? 0,
                 Pitch = zoneGateInfo.Rotation?.Y ?? 0,
                 Yaw = zoneGateInfo.Rotation?.Z ?? 0,
-                IsHighwayGate = isHighwayGate
+                IsHighwayGate = isHighwayGate,
+                //Pluging in a couple extra fields to facilitate future operations
+                ParentZone = zone,
+                ParentSector = sector
             });
         }
 
