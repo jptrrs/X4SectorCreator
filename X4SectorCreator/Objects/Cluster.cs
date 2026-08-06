@@ -87,7 +87,7 @@ namespace X4SectorCreator.Objects
         public Hexagon Hexagon { get; set; }
 
         [JsonIgnore]
-        public bool IsBaseGame => !shuffled && !string.IsNullOrWhiteSpace(BaseGameMapping);
+        public bool IsBaseGame => !string.IsNullOrWhiteSpace(BaseGameMapping);
 
         [JsonIgnore]
         public List<(Sector origin, Gate gate, Sector destination)> ExitPoints
@@ -117,11 +117,6 @@ namespace X4SectorCreator.Objects
                     Destinations.AddUnique(dest);
                     Exits.AddUnique(sector);
                     sector.Destinations.Add(dest, gate);
-                    }
-                    else
-                    {
-                        Exits.Add(sector, new List<(Gate, Sector)> { (gate, dest) });
-                    }
                 }
             }
         }
@@ -212,6 +207,13 @@ namespace X4SectorCreator.Objects
                 set.AddRange(Toolbox.Spread(3, 3, coord => new Point(left + coord.a, upSide - coord.b)).Select(p => (cPoint)p));
                 return set;
             }
+        }
+
+        internal bool SameTerritoryAs(Cluster other)
+        {
+            if (other == null) return false;
+            if (AssignedTerritoryId == -1 || other.AssignedTerritoryId == -1) return false;
+            return AssignedTerritoryId == other.AssignedTerritoryId;
         }
     }
 

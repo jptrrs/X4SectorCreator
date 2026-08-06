@@ -20,6 +20,9 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
             {
                 for (int j = i + 1; j < count; j++)
                 {
+                    // Skip pair if same territory, a check needed when shuffling.
+                    if (clusters[i].SameTerritoryAs(clusters[j]))
+                        continue;
                     float dist = clusters[i].Position.DistanceSquared(clusters[j].Position);
                     edges.Add((clusters[i], clusters[j], dist));
                 }
@@ -147,9 +150,12 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
                 Id = sourceSector.Zones.SelectMany(a => a.Gates).DefaultIfEmpty(new Gate()).Max(a => a.Id) + 1,
                 DestinationSectorName = targetSector.Name,
                 ParentSectorName = sourceSector.Name,
-                Yaw = (int)sourceZone.Position.GetDirectionAngleCompassStyle(new Point(0, 0)) // Point towards center
+                Yaw = (int)sourceZone.Position.GetDirectionAngleCompassStyle(new Point(0, 0)), // Point towards center
+                //Pluging in a couple extra fields to facilitate future operations
+                ParentSector = sourceSector
             };
             sourceZone.Gates.Add(sourceGate);
+            sourceGate.ParentZone = sourceZone;
             sourceSector.Zones.Add(sourceZone);
 
             // Target
@@ -164,9 +170,13 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
                 Id = targetSector.Zones.SelectMany(a => a.Gates).DefaultIfEmpty(new Gate()).Max(a => a.Id) + 1,
                 DestinationSectorName = sourceSector.Name,
                 ParentSectorName = targetSector.Name,
-                Yaw = (int)targetZone.Position.GetDirectionAngleCompassStyle(new Point(0, 0)) // Point towards center
+                Yaw = (int)targetZone.Position.GetDirectionAngleCompassStyle(new Point(0, 0)), // Point towards center
+                //Pluging in a couple extra fields to facilitate future operations
+                ParentSector = targetSector
+
             };
             targetZone.Gates.Add(targetGate);
+            targetGate.ParentZone = targetZone;
             targetSector.Zones.Add(targetZone);
 
             sourceGate.Source = ConvertToPath(sourceCluster, sourceSector, sourceZone);
