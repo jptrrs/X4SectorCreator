@@ -148,6 +148,12 @@ namespace X4SectorCreator.Objects
             return result;
         }
 
+        public void UpdateFacing(int turns)
+        {
+            var sum = Yaw + turns * 90;
+            Yaw = sum % 360;
+        }
+
         [JsonIgnore]
         internal Zone ParentZone
         {

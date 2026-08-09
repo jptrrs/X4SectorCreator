@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Diagnostics.Metrics;
+using System.Text.Json.Serialization;
 using X4SectorCreator.Forms;
 using X4SectorCreator.Helpers;
 
@@ -214,6 +215,24 @@ namespace X4SectorCreator.Objects
             if (other == null) return false;
             if (AssignedTerritoryId == -1 || other.AssignedTerritoryId == -1) return false;
             return AssignedTerritoryId == other.AssignedTerritoryId;
+        }
+
+        internal void FollowUpRotation(int turns)
+        {
+            bool doPlacement = Sectors.Count > 1;
+            foreach (Sector sector in Sectors)
+            {
+                if (doPlacement) sector.RotatePlacementOrtho(turns);
+                foreach (Zone zone in sector.Zones)
+                {
+                    zone.Position = ClusterManager.RotateOrtho(zone.Position, Point.Empty, turns);
+                    zone.Gates.ForEach(gate => gate.UpdateFacing(turns));
+                }
+                foreach (Region region in sector.Regions)
+                {
+                    region.Position = ClusterManager.RotateOrtho(region.Position, Point.Empty, turns);
+                }
+            }
         }
     }
 

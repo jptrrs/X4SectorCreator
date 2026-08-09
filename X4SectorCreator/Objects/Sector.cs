@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using X4SectorCreator.Helpers;
 
 namespace X4SectorCreator.Objects
 {
@@ -198,6 +199,34 @@ namespace X4SectorCreator.Objects
         {
             return MainForm.Instance.AllClusters.Values
                     .FirstOrDefault(cluster => cluster.Sectors.Contains(this));
+        }
+
+        public void RotatePlacementOrtho(int turns)
+        {
+            // Guarantee the default vaule is actually positioned
+            if (Placement == 0)
+            {
+                Placement = SectorPlacement.TopLeft;
+            }
+
+            // Normalize turns to 0-3 range (4 rotations = 360°)
+            turns = ((turns % 4) + 4) % 4;
+            if (turns == 0) return;
+
+            // Index 0 = 1 turn (90°), Index 1 = 2 turns (180°), Index 2 = 3 turns (270°)
+            var rotationMap = new Dictionary<SectorPlacement, SectorPlacement[]>
+            {
+                { SectorPlacement.TopLeft, new[] { SectorPlacement.TopRight, SectorPlacement.BottomRight, SectorPlacement.MiddleLeft } },
+                { SectorPlacement.TopRight, new[] { SectorPlacement.MiddleRight, SectorPlacement.BottomLeft, SectorPlacement.TopLeft } },
+                { SectorPlacement.BottomLeft, new[] { SectorPlacement.MiddleLeft, SectorPlacement.TopRight, SectorPlacement.BottomRight } },
+                { SectorPlacement.BottomRight, new[] { SectorPlacement.BottomLeft, SectorPlacement.TopLeft, SectorPlacement.MiddleRight } },
+                { SectorPlacement.MiddleLeft, new[] { SectorPlacement.TopLeft, SectorPlacement.MiddleRight, SectorPlacement.BottomLeft } },
+                { SectorPlacement.MiddleRight, new[] { SectorPlacement.BottomRight, SectorPlacement.MiddleLeft, SectorPlacement.TopRight } },
+                { SectorPlacement.MiddleTop, new[] { SectorPlacement.MiddleRight, SectorPlacement.MiddleBottom, SectorPlacement.MiddleLeft } },
+                { SectorPlacement.MiddleBottom, new[] { SectorPlacement.MiddleLeft, SectorPlacement.MiddleTop, SectorPlacement.MiddleRight } },
+            };
+
+            Placement = rotationMap[Placement][turns - 1];
         }
     }
 

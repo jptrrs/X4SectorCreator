@@ -61,9 +61,12 @@ namespace X4SectorCreator.Helpers
             return pos;
         }
 
-        public static Point RotateOrtho(Point current, Point pivot, int turns)
+        public static Point RotateOrthoOnHexGrid(Point current, Point pivot, int turns)
         {
-            if (turns <= 0 || turns > 3) return current; //No rotation
+            // Normalize turns to 0-3 range (4 rotations = 360°)
+            turns = ((turns % 4) + 4) % 4;
+            if (turns == 0) return current; //No rotation
+
             pivot = PivotForRotation(pivot);
             double dx = current.X - pivot.X;
             double dy = current.Y - pivot.Y;
@@ -90,22 +93,25 @@ namespace X4SectorCreator.Helpers
             return new Point((int)Math.Round(rotated.x, MidpointRounding.AwayFromZero), (int)Math.Round(rotated.y, MidpointRounding.AwayFromZero));
         }
 
-        //public static Point RotateOrtho(Point current, double cx, double cy, int turns)
-        //{
-        //    // Translate point relative to the center origin
-        //    double dx = current.X - cx;
-        //    double dy = current.Y - cy;
+        public static Point RotateOrtho(Point current, Point pivot, int turns)
+        {
+            // Normalize turns to 0-3 range (4 rotations = 360°)
+            turns = ((turns % 4) + 4) % 4;
 
-        //    (double rx, double ry) = turns switch
-        //    {
-        //        1 => (cx + dy / 2, cy - 2 * dx), // 90° Clockwise
-        //        2 => (cx - dx, cy - dy), // 180° Rotation (Inversion)
-        //        3 => (cx - dy / 2, cy + 2 * dx), // 270° Clockwise
-        //        0 => (current.X, current.Y), // No rotation
-        //        _ => throw new ArgumentException("turn parameter should be 1, 2 or 3.")
-        //    };
+            // Translate point relative to the center origin
+            double dx = current.X - pivot.X;
+            double dy = current.Y - pivot.Y;
 
-        //    return new Point((int)Math.Round(rx, MidpointRounding.AwayFromZero), (int)Math.Round(ry, MidpointRounding.AwayFromZero)).FitToHex();
-        //}
+            (double rx, double ry) = turns switch
+            {
+                1 => (pivot.X + dy, pivot.Y * dx), // 90° Clockwise
+                2 => (pivot.X - dx, pivot.Y - dy), // 180° Rotation (Inversion)
+                3 => (pivot.X - dy, pivot.Y * dx), // 270° Clockwise
+                0 => (current.X, current.Y), // No rotation
+                _ => throw new NotImplementedException(),
+            };
+
+            return new Point((int)Math.Round(rx, MidpointRounding.AwayFromZero), (int)Math.Round(ry, MidpointRounding.AwayFromZero));
+        }
     }
 }

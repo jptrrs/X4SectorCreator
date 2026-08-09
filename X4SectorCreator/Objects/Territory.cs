@@ -150,7 +150,8 @@ namespace X4SectorCreator.Objects
         {
             foreach (var c in Clusters)
             {
-                c.PlannedPosition = ClusterManager.RotateOrtho(c.Position, anchor, turns);
+                c.PlannedPosition = ClusterManager.RotateOrthoOnHexGrid(c.Position, anchor, turns);
+                c.FollowUpRotation(turns);
             }
             SetUpBox();
             List<string> afterRotate = Clusters.Select(c => c.PlannedPosition.ToTuple().ToString()).ToList();
