@@ -44,13 +44,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private Point occupiedMax;
         private HashSet<int> sequentialDomains = [];
         private Dictionary<string, List<int>> staged = [];
-        private Dictionary<int, Territory> territories = [];
+        private Dictionary<int, Territory> territories = [];        
         
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
             // Gather some basic info
             hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
             _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}", true);
+
             // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
             // Map connections for all clusters and register entry points for territories
@@ -65,7 +66,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             TerritoriesReport();
             // Shuffle!
             Shuffle();
-            //
+            // Weave a new network between territories.
             Reconnect();
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
@@ -1023,7 +1024,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             var settings = new ProceduralSettings
             {
-                Seed = Localisation.GetFnvHash("avatar"),
+                Seed = Localisation.GetFnvHash(Random.Shared.Next().ToString()),
                 MinGatesPerSector = 1,
                 MaxGatesPerSector = 2,
                 GateMultiChancePerSector = 15
