@@ -1,6 +1,7 @@
 ﻿using DevConsole.Extractors;
 using DevConsole.PatchHelpers;
 using X4SectorCreator.Configuration;
+using X4SectorCreator.Helpers;
 
 namespace DevConsole
 {
@@ -41,6 +42,7 @@ namespace DevConsole
 
             var factionsPath = Path.Combine(_vanillaFilesPath, "factions.xml");
             RelationsExtractor.ExtractRelations(factionsPath);
+            PoliceFactionExtractor.ExtractPoliceFaction(factionsPath);
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("Started extracting regions");

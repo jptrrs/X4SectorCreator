@@ -22,7 +22,7 @@ namespace DevConsole.PatchHelpers
                 ("dlc_pirate_", GetDirectory(path, SectorMapForm.DlcMapping["Tides Of Avarice"])),
                 ("dlc_boron_", GetDirectory(path, SectorMapForm.DlcMapping["Kingdom End"])),
                 ("dlc7_", GetDirectory(path, SectorMapForm.DlcMapping["Timelines"])),
-                ("dlc_mini_01_", GetDirectory(path, SectorMapForm.DlcMapping["Hyperion Pack"])),
+                ("dlc_mini_01_", GetDirectory(path, SectorMapForm.DlcMapping["Hyperion Pack"])), //Note: comment this line out to run without the Hyperion Pack.
                 ("dlc_mini_02_", GetDirectory(path, SectorMapForm.DlcMapping["Envoy Pack"]))
             ];
 
