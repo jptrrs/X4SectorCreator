@@ -8,6 +8,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
     {
         private readonly Random _random = new(settings.Seed);
         private readonly ProceduralSettings _settings = settings;
+        private const int GateMinDistanceFromCenter = /*75000*/100000;
 
         public void Generate(List<Cluster> clusters)
         {
@@ -201,7 +202,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
 
             // We don't want diameter but radius so half the diameter
             var radius = (int)(sector.DiameterRadius / 2f);
-            int minDistance = Math.Min(75000, (int)(radius / 2f));
+            int minDistance = Math.Min(GateMinDistanceFromCenter, (int)(radius / 2f));
 
             // Zone position determines gate's position (1 gate per zone)
             var existingPositions = sector.Zones
