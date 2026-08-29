@@ -219,7 +219,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     var territory = territories[id];
                     territory.assignedDomainId = d.Key;
-                    territory.peers = d.Value;
+                    territory.peers = d.Value.Where(x => x != territory.id).ToList();
                 }
             }
             var i = set.Count + 1;
@@ -1027,7 +1027,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 Seed = Localisation.GetFnvHash(Random.Shared.Next().ToString()),
                 MinGatesPerSector = 1,
                 MaxGatesPerSector = 2,
-                GateMultiChancePerSector = 15
+                GateMultiChancePerSector = 10
             };
             List<Cluster> clusters = [];
             foreach (var territory in territories.Values)
