@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
@@ -44,30 +45,40 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private Point occupiedMax;
         private HashSet<int> sequentialDomains = [];
         private Dictionary<string, List<int>> staged = [];
-        private Dictionary<int, Territory> territories = [];        
+        private Dictionary<int, Territory> territories = [];
+        private static Dictionary<string, string> policeFactions = [];
         
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
             // Gather some basic info
             hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
             _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}", true);
+            //_ = Toolbox.LogAsync("TEST", string.Join(", ", PoliceFactionExtractor.CollectPoliceFaction(Path.Combine("vanillafiles", "factions.xml"))));
 
             // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
+
             // Map connections for all clusters and register entry points for territories
             FindConnections();
-            // Determine if there are neighboring territories owned by the same faction TO-DO: exclude the Xenon!
+
+            // Determine if there are neighboring territories owned by the same faction.
             FindAnnexed();
-            // Determine if there are other close territories owned by the same faction and separated by only a neutral sector. TO-DO: exclude the Xenon!
+
+            // Determine if there are other close territories owned by the same faction and separated by only a neutral sector.
             FindCloseColonies();
+
             // Consolidate neighbouring territories with the same owner under merged domains.
             ConsolidateDomains();
+
             // Report results so far
             TerritoriesReport();
+
             // Shuffle!
             Shuffle();
+
             // Weave a new network between territories.
             Reconnect();
+
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
 
@@ -86,6 +97,25 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     squareBoundary = Math.Min(GridFrameBounds.maxX, GridFrameBounds.maxY);
                 }
                 return squareBoundary;
+            }
+        }
+
+        private static Dictionary<string, string> PoliceFactions
+        {
+            get
+            {
+                if (policeFactions.Count == 0)
+                {
+                    if (FactionsForm.AllCustomFactions.Count > 0)
+                    {
+                        policeFactions = FactionsForm.AllCustomFactions.ToDictionary(f => f.Key, f => f.Value.PoliceFaction);
+                    }
+                    foreach (var faction in AdditionalFactionMapping.GetDefaultPolice().Where(x => !x.Value.Equals("none", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        policeFactions[faction.Key] = faction.Value;
+                    }
+                }
+                return policeFactions;
             }
         }
 
@@ -244,6 +274,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     var foundId = destination.AssignedTerritoryId;
                     if (foundId > 0)
                     {
+
+
+                        //Check if the two territories are owned by the same faction and are not neutral or Xenon => group them into a domain
                         if (territory.annexedIds.Contains(foundId)) continue;
                         var owner = origin.CurrentOwner;
                         if (owner != null &&
