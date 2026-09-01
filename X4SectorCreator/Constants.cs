@@ -11,6 +11,7 @@
             public static readonly string VanillaRelationsMappingFilePath = Path.Combine(Application.StartupPath, "Data/Mappings/vanilla_relations.json");
             public static readonly string VanillaStationsMappingFilePath = Path.Combine(Application.StartupPath, "Data/Mappings/vanilla_stations.json");
             public static readonly string VanillaConnectionMappingFilePath = Path.Combine(Application.StartupPath, "Data/Mappings/vanilla_connection_mappings.json");
+            public static readonly string VanillaPoliceFactionsMappingFilePath = Path.Combine(Application.StartupPath, "Data/Mappings/vanilla_police_factions.json");
             public static readonly string VanillaBasketsPath = Path.Combine(Application.StartupPath, "Data/Mappings/vanilla_baskets.xml");
             public static readonly string TemplateFactoriesDirectoryPath = Path.Combine(Application.StartupPath, "Data/TemplateFactories");
             public static readonly string TemplateJobsDirectoryPath = Path.Combine(Application.StartupPath, "Data/TemplateJobs");
