@@ -165,10 +165,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             var ordered = clusters.OrderBy(x => x.Position.DistanceSquaredOnHexGrid(Point.Empty)).ToList();
             Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, null/*x => DLCMatch(x)*/, x => AreConnected(x));
-            foreach (var territory in territories.Values)
-            {
-                territory.SetUpBox();
-            }
         }
 
         private void ConsolidateDomains()
@@ -522,7 +518,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
 
                 //Fine-tune the insertion spot so it fits right in.
-                var currentPos = territory.anchor;
+                var currentPos = territory.Anchor;
                 var planned = position.Subtract(currentPos);
                 if (i > 0) position = AdjustForInsertion(territory, planned, branch, direction, occupied, isSequence);
 
@@ -611,7 +607,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private Point AdjustForInsertion(Territory territory, Point displacement, Direction branch, Direction dir, SortedSet<cPoint> occupied, bool isSequence)
         {
-            var selected = territory.anchor.Add(displacement);
+            var selected = territory.Anchor.Add(displacement);
             var width = territory.size.X;
             var oddHeight = territory.HeightToFit;
             var height = oddHeight + oddHeight % 2;
@@ -908,8 +904,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             bool firstRun = branch == Direction.Undefined;
             bool quadrant = branch == lastDir;
             bool cycle = quadrant && branch == Direction.Right;
-            var ax = territory.anchor.X;
-            var ay = territory.anchor.Y;
+            var ax = territory.Anchor.X;
+            var ay = territory.Anchor.Y;
             var width = territory.size.X;
             var height = territory.HeightToFit;
             var slots = new List<(Point pos, string add)>();

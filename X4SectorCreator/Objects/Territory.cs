@@ -51,6 +51,19 @@ namespace X4SectorCreator.Objects
             }
         }
 
+        internal Point Anchor
+        {
+            get
+            {
+                if (anchor.IsEmpty) SetUpBox();
+                return anchor;
+            }
+            set
+            {
+                anchor = value;
+            }
+        }
+
         /// <summary>
         /// A list of connections to/from a territory.
         /// </summary>
@@ -135,11 +148,11 @@ namespace X4SectorCreator.Objects
 
         internal string Reposition(Point displacement)
         {
-            anchor = anchor.Add(displacement);
+            Anchor = Anchor.Add(displacement);
             List<string> log = new List<string>();
             foreach (var cluster in Clusters)
             {
-                cluster.Position = anchor.Add(cluster.AnchorOffset);
+                cluster.Position = Anchor.Add(cluster.AnchorOffset);
                 cluster.shuffled = true;
                 log.Add($"{cluster.Name} {cluster.Position.ToTuple()}");
             }
@@ -150,7 +163,7 @@ namespace X4SectorCreator.Objects
         {
             foreach (var c in Clusters)
             {
-                c.PlannedPosition = ClusterManager.RotateOrthoOnHexGrid(c.Position, anchor, turns);
+                c.PlannedPosition = ClusterManager.RotateOrthoOnHexGrid(c.Position, Anchor, turns);
                 c.FollowUpRotation(turns);
             }
             SetUpBox();
@@ -170,20 +183,21 @@ namespace X4SectorCreator.Objects
             var width = box[0] - box[2] + 1;
             var height = box[3] - box[1] + 2;
             var corner = new Point(box[2], box[3]);
-            anchor = corner.FitToHex();
+            var anchor = corner.FitToHex();
+            Anchor = anchor;
             size = new Point(width, height);
             overhead = anchor.Y > box[3];
             double centerX = corner.X + (width - 1) / 2.0;
             double centerY = corner.Y - (height - 2) / 2.0;
             center = (centerX, centerY);
-            SetUpClustersOffsets();
+            SetUpClustersOffsets(anchor);
         }
 
-        internal void SetUpClustersOffsets()
+        internal void SetUpClustersOffsets(Point origin)
         {
             foreach (var cluster in Clusters)
             {
-                cluster.AnchorOffset = cluster.PlannedPosition.Subtract(anchor);
+                cluster.AnchorOffset = cluster.PlannedPosition.Subtract(origin);
             }
         }
 
