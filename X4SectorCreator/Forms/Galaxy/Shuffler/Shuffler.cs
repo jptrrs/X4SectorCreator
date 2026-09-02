@@ -53,13 +53,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Gather some basic info
             hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
             _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}", true);
-            //_ = Toolbox.LogAsync("TEST", string.Join(", ", PoliceFactionExtractor.CollectPoliceFaction(Path.Combine("vanillafiles", "factions.xml"))));
 
             // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
-
-            // Map connections for all clusters and register entry points for territories
-            FindConnections();
 
             // Determine if there are neighboring territories owned by the same faction.
             FindAnnexed();
@@ -141,6 +137,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 .ToHashSet();
             return crowd.Where(cluster => targetPositions.Contains(cluster.Position));
         };
+
         private Func<Cluster, bool> DLCMatch => cluster =>
         {
             return cluster.Dlc == territories.Last().Value.dlc;
@@ -260,33 +257,57 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private void FindAnnexed()
         {
+            List<int> absorbed = [];
             foreach (var territory in territories.Values)
             {
-                if (territory.Connections?.Count == 0) continue;
-                foreach (var entry in territory.Connections)
+                if (territory == null || territory.Connections?.Count == 0) continue;
+                List<int> annexed = [];
+                var connections = territory.Connections.ToList();
+                foreach (var entry in connections)
                 {
                     var origin = entry.origin;
                     var destination = entry.destination;
                     var foundId = destination.AssignedTerritoryId;
                     if (foundId > 0)
                     {
-
-
+                        var owner = origin.CurrentOwner;
+                        if (owner == null || annexed.Contains(foundId)) continue;
+                        if (!string.IsNullOrWhiteSpace(territory.dlc))
+                        {
+                            var linked = territories[foundId];
+                            var linkedOwner = destination.CurrentOwner.ToLower();
+                            if (linked != null &&
+                                !string.IsNullOrWhiteSpace(linked.dlc) &&
+                                linked.dlc.Equals(territory.dlc) &&
+                                !linkedOwner.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                                PoliceFactions.ContainsKey(linkedOwner) &&
+                                owner.Equals(PoliceFactions[linkedOwner]))
+                            {
+                                territory.Absorb(linked);
+                                territories[foundId] = null;
+                                absorbed.Add(foundId);
+                                annexed.Add(foundId);
+                                continue;
+                            }
+                        }
                         //Check if the two territories are owned by the same faction and are not neutral or Xenon => group them into a domain
                         if (territory.annexedIds.Contains(foundId)) continue;
-                        var owner = origin.CurrentOwner;
-                        if (owner != null &&
-                            !origin.IsNeutral &&
+                        if (!origin.IsNeutral &&
                             owner.Equals(destination.CurrentOwner, StringComparison.Ordinal) &&
                             !owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
                         {
                             territory.annexedIds.AddUnique(foundId);
+                            annexed.AddUnique(foundId);
                             territories[foundId].annexedIds.AddUnique(territory.id);
                             var key = domains.Count + 1;
                             domains.Add(key, [territory.id, foundId]);
                         }
                     }
                 }
+            }
+            foreach (var id in absorbed)
+            {
+                territories.Remove(id);
             }
         }
 
@@ -321,23 +342,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
             }
         }
-
-        private void FindConnections()
-        {
-            foreach (var territory in territories.Values)
-            {
-                var roads = new List<(Cluster, Sector, Gate, Sector)>();
-                foreach (var cluster in territory.Clusters)
-                {
-                    cluster.ExitPoints = ClusterManager.PickDestinationsFromCluster(cluster, c => c != cluster);
-                    foreach (var exit in cluster.ExitPoints.Where(x => x.destination.AssignedTerritoryId != territory.id))
-                    {
-                        roads.Add((cluster, exit.origin, exit.gate, exit.destination));
-                    }
-                }
-                territory.Connections = roads;
-            }
-        }
         
         private bool KeepSequence(List<Territory> set)
         {
@@ -353,12 +357,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var t in territories.Values)
             {
                 var owner = t.seed.Sectors[0].IsNeutral ? "Neutral" : t.seed.Sectors[0].CurrentOwner;
-                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}");
+                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}, dlc: {t.dlc}, police: {(PoliceFactions.ContainsKey(owner.ToLower()) ? PoliceFactions[owner.ToLower()] : "NOT FOUND")}");
                 if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 if (t.isBridge) log.Append($"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].id}-{territories[y].seed.Name}"))}");
                 if (t.closeColonyIds.Count > 0) log.Append($"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 log.AppendLine(".");
             }
+            log.AppendLine($"POLICE: {string.Join(", ", PoliceFactions)}");
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString());
         }
 

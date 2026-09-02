@@ -117,11 +117,10 @@ namespace X4SectorCreator.Objects
                     var dest = item.destination;
                     Destinations.AddUnique(dest);
                     Exits.AddUnique(sector);
-                    sector.Destinations.Add(dest, gate);
+                    sector.Destinations.TryAdd(dest, gate);
                 }
             }
         }
-
 
         public void AutoPositionSectors(bool randomize = false, Random random = null)
         {

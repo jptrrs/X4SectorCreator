@@ -1,5 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 using X4SectorCreator.Helpers;
+using X4SectorCreator.XmlGeneration;
 
 namespace X4SectorCreator.Objects
 {
@@ -48,7 +49,7 @@ namespace X4SectorCreator.Objects
                     }
                     else if (factions.Count == 0 || faction.Equals(Owner, StringComparison.OrdinalIgnoreCase)) //results in an empty string if inferred owner conflicts with the base game's.
                     {
-                        result = Owner;
+                        result = GodGeneration.CorrectFactionName(Owner);
                     }
                     currentOwner = result;
 

@@ -6,7 +6,6 @@ namespace X4SectorCreator.Objects
 {
     internal class Territory : ClusterCollection
     {
-        internal Point anchor = Point.Empty;
         internal List<int> annexedIds = [];
         internal List<int> closeColonyIds = [];
         internal List<cPoint> contour = [];
@@ -15,16 +14,18 @@ namespace X4SectorCreator.Objects
         internal List<Cluster> bordering = [];
         internal int id, assignedDomainId;
         internal bool isBridge = false;
+        internal bool unconnected = false;
         internal bool? isVanilla;
         internal List<int> peers = [];
         internal Cluster seed;
         internal Point size = Point.Empty;
         private int[] box = new int[4];
 
+        private Point anchor = Point.Empty;
         private (double x, double y) center;
         private HashSet<Cluster> exitClusters = [];
-        private List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> connections = [];       
-        
+        private List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> connections = [];
+
         private bool overhead = false;
 
         internal Territory(Cluster seed, int lastID)
@@ -72,30 +73,31 @@ namespace X4SectorCreator.Objects
         /// <param name="gate">The gate itself.</param>
         /// <param name="destination">The sector it connects to.</param>
         internal List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> Connections
-        {
+        { 
             get
             {
-                if (connections.Count == 0)
-                {
-                    connections = bordering.SelectMany(c => c.Exits.SelectMany(s => s.Destinations.Select(e => (c, s, e.Value, e.Key))))
-                    .ToList();
-                }
+                if (connections.Count == 0 && !unconnected) SetUpConnections();
                 return connections;
-            }
-            set
+            } 
+        }
+
+        internal void SetUpConnections()
+        {
+            bordering.Clear();
+            connections.Clear();
+            foreach (var cluster in Clusters)
             {
-                bordering.Clear();
-                connections.Clear();
-                foreach (var item in value)
+                cluster.ExitPoints = ClusterManager.PickDestinationsFromCluster(cluster, c => c != cluster);
+                foreach (var exit in cluster.ExitPoints.Where(x => x.destination.AssignedTerritoryId != id))
                 {
-                    if (item.cluster == null || item.origin == null || item.gate == null || item.destination == null) continue;
-                    var cluster = item.cluster;
-                    var sector = item.origin;
-                    var gate = item.gate;
-                    var dest = item.destination;
+                    connections.Add((cluster, exit.origin, exit.gate, exit.destination));
                     bordering.AddUnique(cluster);
-                    connections.Add((cluster, sector, gate, dest));
                 }
+            }
+            if (connections.Count == 0)
+            {
+                unconnected = true;
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"WARNING: #{id} - {seed.Name} has no connections to other territories.");
             }
         }
 
@@ -261,6 +263,17 @@ namespace X4SectorCreator.Objects
                 else exitDir = hOption;
             }
             exitDirection = exitDir;
+        }
+
+        internal void Absorb(Territory other)
+        {
+            if (other == null) return;
+            foreach (var cluster in other.Clusters)
+            {
+                Clusters.Add(cluster);
+                cluster.AssignedTerritoryId = id;
+            }
+            SetUpConnections();
         }
     }
 }
