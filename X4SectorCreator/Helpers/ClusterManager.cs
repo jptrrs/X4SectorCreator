@@ -104,9 +104,9 @@ namespace X4SectorCreator.Helpers
 
             (double rx, double ry) = turns switch
             {
-                1 => (pivot.X + dy, pivot.Y * dx), // 90° Clockwise
+                1 => (pivot.X + dy, pivot.Y - dx), // 90° Clockwise
                 2 => (pivot.X - dx, pivot.Y - dy), // 180° Rotation (Inversion)
-                3 => (pivot.X - dy, pivot.Y * dx), // 270° Clockwise
+                3 => (pivot.X - dy, pivot.Y + dx), // 270° Clockwise
                 0 => (current.X, current.Y), // No rotation
                 _ => throw new NotImplementedException(),
             };
