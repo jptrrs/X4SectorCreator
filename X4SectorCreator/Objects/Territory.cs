@@ -6,27 +6,22 @@ namespace X4SectorCreator.Objects
 {
     internal class Territory : ClusterCollection
     {
-        internal List<int> annexedIds = [];
-        internal List<int> closeColonyIds = [];
+        internal List<int> annexedIds = [], closeColonyIds = [], peers = [];
         internal List<cPoint> contour = [];
         internal string dlc;
         internal Direction exitDirection;
         internal List<Cluster> bordering = [];
         internal int id, assignedDomainId;
-        internal bool isBridge = false;
-        internal bool unconnected = false;
-        internal bool? isVanilla;
-        internal List<int> peers = [];
+        internal bool isBridge = false, unconnected = false, overhead = false, toMerge = false;
         internal Cluster seed;
         internal Point size = Point.Empty;
+        
         private int[] box = new int[4];
-
+        private bool? isNeutral, isVanilla, sameOwner, landlocked;
         private Point anchor = Point.Empty;
         private (double x, double y) center;
         private HashSet<Cluster> exitClusters = [];
         private List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> connections = [];
-
-        private bool overhead = false;
 
         internal Territory(Cluster seed, int lastID)
         {
@@ -101,25 +96,16 @@ namespace X4SectorCreator.Objects
             }
         }
 
-        internal IEnumerable<(Cluster cluster, Sector origin, Gate gate, Sector destination)> ExitConnections
-        {
-            get
-            {
-                if (Connections.Count == 0) return null;
-                return Connections.Where(x => !peers.Contains(x.destination.AssignedTerritoryId));
-            }
-        }
-
         internal HashSet<Cluster> ExitClusters
         {
             get
             {
                 if (exitClusters.Count == 0)
                 {
-                    var exits = ExitConnections;
+                    var exits = Connections;
                     if (exits != null)
                     {
-                        exitClusters = ExitConnections?.Select(x => x.cluster).ToHashSet();
+                        exitClusters = Connections?.Select(x => x.cluster).ToHashSet();
                     }
                 }
                 return exitClusters;
@@ -130,11 +116,23 @@ namespace X4SectorCreator.Objects
         {
             get
             {
-                return ExitConnections?.Select(x => x.gate).ToHashSet();
+                return Connections?.Select(x => x.gate).ToHashSet();
             }
         }
 
         internal int HeightToFit => overhead ? size.Y + 1 : size.Y;
+
+        internal bool IsNeutral
+        {
+            get
+            {
+                if (isNeutral == null)
+                {
+                    isNeutral = Clusters.All(c => c.Sectors.All(s => s.IsNeutral));
+                }
+                return (bool)isNeutral;
+            }
+        }
 
         internal bool IsVanilla
         {
@@ -145,6 +143,40 @@ namespace X4SectorCreator.Objects
                     isVanilla = Clusters.Any(x => string.IsNullOrWhiteSpace(x.Dlc));
                 }
                 return (bool)isVanilla;
+            }
+        }
+
+        // Determines if all clusters in the territory belong tp the same owner, ignoring vacant clusters and disputes with the Xenon. Xenon-only territories return positive, though.
+        internal bool SameOwner
+        {
+            get
+            {
+                if (sameOwner == null)
+                {
+                    var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var cluster in Clusters)
+                    {
+                        var owner = cluster.GetOwnerShip();
+                        if (string.IsNullOrEmpty(owner) || owner.Equals("None")) continue;
+                        ownerships.Add(owner.ToLower());
+                    }
+                    bool allSameOwner = ownerships != null && ownerships.Count == 1;
+                    bool xenonInvading = !allSameOwner && ownerships.Count == 2 && ownerships.Contains("xenon");
+                    sameOwner = allSameOwner || xenonInvading;
+                }
+                return (bool)sameOwner;
+            }
+        }
+
+        internal bool Landlocked
+        {
+            get
+            {
+                if (landlocked == null)
+                {
+                    landlocked = Connections.Count > 0 && Connections.All(c => c.origin.CurrentOwner.Equals(c.destination.CurrentOwner, StringComparison.OrdinalIgnoreCase));
+                }
+                return (bool)landlocked;
             }
         }
 
@@ -203,7 +235,7 @@ namespace X4SectorCreator.Objects
             }
         }
 
-        internal void SetUpDirection()
+        internal void SetUpDirection(bool restricted = false)
         {
             if (size.IsEmpty) SetUpBox();
             Direction exitDir = Direction.Undefined;
@@ -217,8 +249,8 @@ namespace X4SectorCreator.Objects
             int voteRight = 0;
             int voteLeft = 0;
             List<Cluster> accountedFor = [];
-            bool landLocked = ExitClusters == null || ExitClusters.Count == 0;
-            var relevant = bordering.Where(c => c.Destinations.Any(s => peers.Contains(s.AssignedTerritoryId) == landLocked));
+            //Unless restricted, take into account only clusters connected to outside of the domain.
+            var relevant = peers.Count > 0 ? bordering.Where(c => c.Destinations.Any(s => peers.Contains(s.AssignedTerritoryId) == restricted)) : bordering;
             foreach (var c in relevant)
             {
                 //Cluster position relative to its territory
@@ -231,7 +263,7 @@ namespace X4SectorCreator.Objects
                 //The more destinations from a cluster, bigger weight given to this.
                 foreach (var s in c.Destinations)
                 {
-                    if (peers.Contains(s.AssignedTerritoryId) != landLocked) continue;
+                    if (peers.Contains(s.AssignedTerritoryId) != restricted) continue;
                     var d = s.FindCluster();
                     if (accountedFor.Contains(d)) continue; //so we don't double-count
                     if (c.Position.X < d.Position.X) voteRight++;
@@ -268,7 +300,8 @@ namespace X4SectorCreator.Objects
         internal void Absorb(Territory other)
         {
             if (other == null) return;
-            foreach (var cluster in other.Clusters)
+            var clusters = other.Clusters.ToList();
+            foreach (var cluster in clusters)
             {
                 Clusters.Add(cluster);
                 cluster.AssignedTerritoryId = id;

@@ -1,5 +1,4 @@
-﻿using System.Linq;
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
@@ -48,6 +47,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private Dictionary<int, Territory> territories = [];
         private static Dictionary<string, string> policeFactions = [];
         
+
+        //TO DO:
+        // 2. Rever conexões, tentar garantir que domínios fiquem inter-conectados.
+
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
             // Gather some basic info
@@ -63,7 +66,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Determine if there are other close territories owned by the same faction and separated by only a neutral sector.
             FindCloseColonies();
 
-            // Consolidate neighbouring territories with the same owner under merged domains.
+            // Consolidate neighbouring territories into one (following DLC criteria) or under merged domains (if owner is shared).
             ConsolidateDomains();
 
             // Report results so far
@@ -143,6 +146,28 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return cluster.Dlc == territories.Last().Value.dlc;
         };
 
+        private static bool ShouldMergeByPolice(Sector origin, Sector destination)
+        {
+            //works for Terrans and Avarice
+            var owner = origin.CurrentOwner.ToLower();
+            var targetOwner = destination.CurrentOwner.ToLower();
+            return PoliceFactions.ContainsKey(targetOwner) && owner.Equals(PoliceFactions[targetOwner]);
+        }
+
+        private static bool SharedOwner(string owner, string targetOwner)
+        {
+            return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
+        }
+
+        private static bool ShouldMergeByDLC(Territory selected, Territory target)
+        {
+            return !string.IsNullOrWhiteSpace(selected.dlc) 
+                && !string.IsNullOrWhiteSpace(target.dlc) 
+                && selected.dlc.Equals(target.dlc, StringComparison.OrdinalIgnoreCase)
+                && selected.SameOwner
+                && target.SameOwner;
+        }
+
         private Action<Cluster, bool> SortTerritory => (cluster, reset) =>
         {
             if (reset)
@@ -161,13 +186,105 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
             var ordered = clusters.OrderBy(x => x.Position.DistanceSquaredOnHexGrid(Point.Empty)).ToList();
-            Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, null/*x => DLCMatch(x)*/, x => AreConnected(x));
+            Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, null, x => AreConnected(x));
         }
 
         private void ConsolidateDomains()
         {
             // Build groups by merging any overlapping sets into larger ones.
-            var groups = new List<HashSet<int>>();
+            List<HashSet<int>> groups = MergeOverlappingDomains();
+
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Before: {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
+
+
+            // filter out and merge the domains that ask for it.
+            List<HashSet<int>> groupsLeft = MergeAndFilterOutDomains(groups);
+
+            // rebuild the dictionary so each entry is a consolidated domain.
+            Dictionary<int, List<int>> consolidated = [];
+            int idx = 1;
+            int count = 0;
+            foreach (var g in groupsLeft)
+            {
+                count += g.Count;
+                consolidated.Add(idx++, SequencedDomainFromHash(idx, g));
+            }
+            domains = DesignatedDomains(consolidated);
+
+            //Now we're able to calculate territories' preferred orientations:
+            InferOrientations();
+
+            // logging
+            count += domains.Count - idx;
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}\n{count} territories in total.");
+        }
+
+        private List<int> SequencedDomainFromHash(int idx, HashSet<int> g)
+        {
+            List<int> result = [];
+            if (KeepSequence(g.Select(x => territories[x]).ToList()))
+            {
+                result = g.OrderBy(x => x).ToList();
+                sequentialDomains.Add(idx); //note that down for later.
+            }
+            else
+            {
+                result = g.OrderBy(x => Random.Shared.Next()).ToList();
+            }
+            return result;
+        }
+
+        //private List<HashSet<int>> MergeOverlappingDomains()
+        //{
+        //    // Convert domain values to a flat list of territory IDs
+        //    List<int> allTerritoryIds = territories.Keys.ToList();
+
+        //    // Track which territories belong to which merged group
+        //    List<HashSet<int>> mergedGroups = [];
+        //    int groupCounter = 0;
+
+        //    Toolbox.FlexFloodProcessor(
+        //        allTerritoryIds,
+        //        process: (territoryId, isSeed) =>
+        //        {
+        //            if (isSeed)
+        //            {
+        //                mergedGroups.Add(new HashSet<int> { territoryId });
+        //            }
+        //            else
+        //            {
+        //                mergedGroups[groupCounter].Add(territoryId);
+        //            }
+        //        },
+        //        selector: (current, remaining) =>
+        //        {
+        //            // Find all remaining territories that share a domain connection with current
+        //            var connectedIds = new HashSet<int>();
+
+        //            foreach (var domain in domains.Values)
+        //            {
+        //                if (domain.Contains(current))
+        //                {
+        //                    // Add all territories from this domain that are still remaining
+        //                    foreach (var id in domain.Where(d => remaining.Contains(d)))
+        //                    {
+        //                        connectedIds.Add(id);
+        //                    }
+        //                }
+        //            }
+
+        //            return connectedIds;
+        //        },
+        //        filter: null,
+        //        comparsion: null
+        //    );
+
+        //    return mergedGroups;
+        //}
+
+        private List<HashSet<int>> MergeOverlappingDomains()
+        {
+            List<HashSet<int>> groups = [];
 
             foreach (var values in domains.Values)
             {
@@ -198,39 +315,73 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         foreach (var id in g)
                         {
                             target.Add(id);
-                            groups.Remove(g);
                         }
+                        groups.Remove(g);
                     }
                 }
             }
 
-            // rebuild the dictionary so each entry is a consolidated domain.
-            var consolidated = new Dictionary<int, List<int>>();
-            int idx = 1;
-            int count = 0;
+            return groups;
+        }
+
+        private List<HashSet<int>> MergeAndFilterOutDomains(List<HashSet<int>> groups)
+        {
+            List<HashSet<int>> result = [];
             foreach (var g in groups)
             {
-                count += g.Count;
-                List<int> reordered = [];
-                if (KeepSequence(g.Select(x => territories[x]).ToList()))
+                if (g.Count > 1 && g.Any(x => territories[x].toMerge))
                 {
-                    reordered = g.OrderBy(x => x).ToList();
-                    sequentialDomains.Add(idx); //note that down for later.
+                    if (g.Any(x => territories[x].isBridge))
+                    {
+                        MergeDomain(g);
+                        continue;
+                    }
+                    var toMergeItems = g.Where(x => territories[x].toMerge).ToHashSet();
+                    var notToMergeItems = g.Where(x => !territories[x].toMerge).ToHashSet();
+                    if (toMergeItems.Count > 1)
+                    {
+                        MergeDomain(toMergeItems);
+                    }
+                    else if (g.Count == 2)
+                    {
+                        result.Add(g);
+                        continue;
+                    }
+                    if (notToMergeItems.Count > 0)
+                    {
+                        result.Add(notToMergeItems);
+                        foreach (var territory in notToMergeItems.Select(x => territories[x]))
+                        {
+                            territory.annexedIds.RemoveAll(i => toMergeItems.Contains(i));
+                        }
+                    }
                 }
                 else
                 {
-                    reordered = g.OrderBy(x => Random.Shared.Next()).ToList();
+                    result.Add(g);
                 }
-                consolidated.Add(idx++, reordered);
             }
-            domains = DesignatedDomains(consolidated);
+            return result;
+        }
 
-            //Now we're able to calculate territories' preferred orientations:
-            InferOrientations();
-
-            // logging
-            count += domains.Count - idx;
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}\n{count} territories total.");
+        private void MergeDomain(HashSet<int> g)
+        {
+            var territory = territories[g.First()];
+            List<int> absorbed = [];
+            foreach (var i in g.Skip(1))
+            {
+                var target = territories[i];
+                territory.Absorb(target);
+                absorbed.Add(i);
+            }
+            //territory.annexedIds.RemoveAll(i => absorbed.Contains(i));
+            territory.annexedIds.Clear();
+            territory.closeColonyIds.Clear();
+            foreach (var i in absorbed)
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{i}({territories[i].seed.Name},  SameOwner={territories[i].SameOwner}) was absorbed by #{territory.id}({territory.seed.Name},  SameOwner={territory.SameOwner}).");
+                territories.Remove(i);
+            }
         }
 
         private Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
@@ -240,6 +391,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 foreach (var id in d.Value)
                 {
+                    if (!territories.ContainsKey(id)) continue;
                     var territory = territories[id];
                     territory.assignedDomainId = d.Key;
                     territory.peers = d.Value.Where(x => x != territory.id).ToList();
@@ -257,62 +409,42 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private void FindAnnexed()
         {
-            List<int> absorbed = [];
-            foreach (var territory in territories.Values)
+            List<(Territory territory, Sector origin, Sector destination)> connections = territories.Values
+                .SelectMany(t => t.Connections
+                .Select(c => (t, c.origin, c.destination)))
+                .ToList();
+            List<int> annexed = [];
+            foreach (var (territory, origin, destination) in connections)
             {
-                if (territory == null || territory.Connections?.Count == 0) continue;
-                List<int> annexed = [];
-                var connections = territory.Connections.ToList();
-                foreach (var entry in connections)
+                var targetId = destination.AssignedTerritoryId;
+                if (origin.IsNeutral || destination.IsNeutral || targetId < 1) continue;
+                var target = territories[targetId];
+                if (target != null)
                 {
-                    var origin = entry.origin;
-                    var destination = entry.destination;
-                    var foundId = destination.AssignedTerritoryId;
-                    if (foundId > 0)
+                    var owner = origin.CurrentOwner.ToLower();
+                    var targetOwner = destination.CurrentOwner.ToLower();
+                    if (owner == null || annexed.Contains(targetId)) continue;
+                    bool toMerge = ShouldMergeByDLC(territory, target)
+                        && (ShouldMergeByPolice(origin, destination)
+                        || ((target.Landlocked || territory.Landlocked) && SharedOwner(owner, targetOwner)));
+                    bool sameOwner = SharedOwner(owner, targetOwner);
+                    if (toMerge || sameOwner)
                     {
-                        var owner = origin.CurrentOwner;
-                        if (owner == null || annexed.Contains(foundId)) continue;
-                        if (!string.IsNullOrWhiteSpace(territory.dlc))
-                        {
-                            var linked = territories[foundId];
-                            var linkedOwner = destination.CurrentOwner.ToLower();
-                            if (linked != null &&
-                                !string.IsNullOrWhiteSpace(linked.dlc) &&
-                                linked.dlc.Equals(territory.dlc) &&
-                                !linkedOwner.Equals("none", StringComparison.OrdinalIgnoreCase) &&
-                                PoliceFactions.ContainsKey(linkedOwner) &&
-                                owner.Equals(PoliceFactions[linkedOwner]))
-                            {
-                                territory.Absorb(linked);
-                                territories[foundId] = null;
-                                absorbed.Add(foundId);
-                                annexed.Add(foundId);
-                                continue;
-                            }
-                        }
-                        //Check if the two territories are owned by the same faction and are not neutral or Xenon => group them into a domain
-                        if (territory.annexedIds.Contains(foundId)) continue;
-                        if (!origin.IsNeutral &&
-                            owner.Equals(destination.CurrentOwner, StringComparison.Ordinal) &&
-                            !owner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
-                        {
-                            territory.annexedIds.AddUnique(foundId);
-                            annexed.AddUnique(foundId);
-                            territories[foundId].annexedIds.AddUnique(territory.id);
-                            var key = domains.Count + 1;
-                            domains.Add(key, [territory.id, foundId]);
-                        }
+                        territory.annexedIds.AddUnique(targetId);
+                        annexed.Add(targetId);
+                        target.annexedIds.AddUnique(territory.id);
+                        var key = domains.Count + 1;
+                        domains.Add(key, [territory.id, targetId]);
+                        territory.toMerge |= toMerge;
+                        target.toMerge |= toMerge;
                     }
                 }
-            }
-            foreach (var id in absorbed)
-            {
-                territories.Remove(id);
             }
         }
 
         private void FindCloseColonies()
         {
+            Dictionary<int, string> absorbed = [];
             var candidates = territories.Values
                 .SelectMany(t => t.bordering)
                 .Where(c => c.ExitPoints?.Count > 1 && c.Exits.All(s => s.IsNeutral))
@@ -323,9 +455,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     .Where(s => !s.IsNeutral && !s.CurrentOwner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
                     .GroupBy(s => s.CurrentOwner)
                     .Where(g => g.Count() > 1)
-                    .Select(g => g.Select(s => territories[s.AssignedTerritoryId]))
+                    .Select(g => g.Select(s => territories[s.AssignedTerritoryId]).ToList())
                     .ToList();
                 if (!connected.Any()) continue;
+                //merge only if only one set of owned territories is being bridged
+                bool toMerge = connected.Count == 1;
                 foreach (var grouped in connected)
                 {
                     foreach (var neighbor in grouped)
@@ -336,14 +470,15 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     cluster.BridgeFor.AddRange(bridged);
                     var bridge = territories[cluster.AssignedTerritoryId];
                     bridge.isBridge = true;
+                    bridge.toMerge = toMerge;
                     var extents = bridged.Append(bridge.id).ToList();
                     var id = domains.Count + 1;
                     domains.Add(id, extents);
                 }
             }
         }
-        
-        private bool KeepSequence(List<Territory> set)
+
+        private static bool KeepSequence(List<Territory> set)
         {
             //Spares certain domain sets from spawning in randomized order: , .
             return set.Any(x => x.isBridge) // close colonies
@@ -356,22 +491,29 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             log.AppendLine($"\n\n--- Territories ---\n");
             foreach (var t in territories.Values)
             {
-                var owner = t.seed.Sectors[0].IsNeutral ? "Neutral" : t.seed.Sectors[0].CurrentOwner;
-                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}, dlc: {t.dlc}, police: {(PoliceFactions.ContainsKey(owner.ToLower()) ? PoliceFactions[owner.ToLower()] : "NOT FOUND")}");
+                string ownerName = t.SameOwner ? t.seed.Sectors[0].CurrentOwner : "Divided";
+                var owner = t.IsNeutral ? "Neutral" : ownerName;
+                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}{(string.IsNullOrEmpty(t.dlc) ? "" : $", dlc: {t.dlc}")}{(PoliceFactions.ContainsKey(owner.ToLower()) ? $", police: {PoliceFactions[owner.ToLower()]}" : "")}.");
                 if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 if (t.isBridge) log.Append($"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].id}-{territories[y].seed.Name}"))}");
                 if (t.closeColonyIds.Count > 0) log.Append($"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 log.AppendLine(".");
             }
-            log.AppendLine($"POLICE: {string.Join(", ", PoliceFactions)}");
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString());
         }
 
         private void InferOrientations()
         {
-            foreach (var territory in territories.Values)
+            foreach (var domain in domains.Values)
             {
-                territory.SetUpDirection();
+                for (int i = 0; i < domain.Count; i++)
+                {
+                    if (territories.ContainsKey(domain[i]))
+                    {
+                        var territory = territories[domain[i]];
+                        territory.SetUpDirection(i > 0);
+                    }
+                }
             }
         }
 
@@ -657,7 +799,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     else
                     {
                         _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it by {adjust.ToTuple()}.");
-                    }
+                      }
                 }
                 //Move to avoid overlaps...
                 offset = offset.Add(adjust);
@@ -1060,13 +1202,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 Seed = Localisation.GetFnvHash(Random.Shared.Next().ToString()),
                 MinGatesPerSector = 1,
-                MaxGatesPerSector = 2,
-                GateMultiChancePerSector = 10
+                MaxGatesPerSector = 1,
+                GateMultiChancePerSector = 0
             };
             List<Cluster> clusters = [];
             foreach (var territory in territories.Values)
             {
-                if (territory.ExitGates == null) continue;
+                if (territory.ExitGates == null || territory.isBridge) continue;
                 foreach (var gate in territory.ExitGates)
                 {
                     var zone = gate.ParentZone;
