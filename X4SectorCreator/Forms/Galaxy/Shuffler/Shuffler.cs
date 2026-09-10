@@ -180,7 +180,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var territory = territories.Last().Value;
             territory.Clusters.Add(cluster);
             cluster.AssignedTerritoryId = territory.id;
-
         };
 
         private void CarveTerritories(IEnumerable<Cluster> clusters)
@@ -194,9 +193,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Build groups by merging any overlapping sets into larger ones.
             List<HashSet<int>> groups = MergeOverlappingDomains();
 
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Before: {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
-
-
             // filter out and merge the domains that ask for it.
             List<HashSet<int>> groupsLeft = MergeAndFilterOutDomains(groups);
 
@@ -207,7 +203,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var g in groupsLeft)
             {
                 count += g.Count;
-                consolidated.Add(idx++, SequencedDomainFromHash(idx, g));
+                consolidated.Add(idx++, g.OrderBy(x => Random.Shared.Next()).ToList()/*SequencedDomainFromHash(idx, g)*/);
             }
             domains = DesignatedDomains(consolidated);
 
@@ -234,94 +230,23 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
-        //private List<HashSet<int>> MergeOverlappingDomains()
-        //{
-        //    // Convert domain values to a flat list of territory IDs
-        //    List<int> allTerritoryIds = territories.Keys.ToList();
-
-        //    // Track which territories belong to which merged group
-        //    List<HashSet<int>> mergedGroups = [];
-        //    int groupCounter = 0;
-
-        //    Toolbox.FlexFloodProcessor(
-        //        allTerritoryIds,
-        //        process: (territoryId, isSeed) =>
-        //        {
-        //            if (isSeed)
-        //            {
-        //                mergedGroups.Add(new HashSet<int> { territoryId });
-        //            }
-        //            else
-        //            {
-        //                mergedGroups[groupCounter].Add(territoryId);
-        //            }
-        //        },
-        //        selector: (current, remaining) =>
-        //        {
-        //            // Find all remaining territories that share a domain connection with current
-        //            var connectedIds = new HashSet<int>();
-
-        //            foreach (var domain in domains.Values)
-        //            {
-        //                if (domain.Contains(current))
-        //                {
-        //                    // Add all territories from this domain that are still remaining
-        //                    foreach (var id in domain.Where(d => remaining.Contains(d)))
-        //                    {
-        //                        connectedIds.Add(id);
-        //                    }
-        //                }
-        //            }
-
-        //            return connectedIds;
-        //        },
-        //        filter: null,
-        //        comparsion: null
-        //    );
-
-        //    return mergedGroups;
-        //}
-
         private List<HashSet<int>> MergeOverlappingDomains()
         {
-            List<HashSet<int>> groups = [];
+            List<HashSet<int>> mergedGroups = [];
 
-            foreach (var values in domains.Values)
+            Action<HashSet<int>, bool> MergeDomains = (entry, reset) =>
             {
-                if (values == null || values.Count < 2) continue;
-                int a = values[0];
-                int b = values[1];
-                int c = values.Count > 2 ? values[2] : -1;
+                if (reset) mergedGroups.Add(entry);
+                else mergedGroups.Last().UnionWith(entry);
+            };
 
-                // Find all existing groups that intersect this set
-                var intersecting = groups.Where(g => g.Contains(a) || g.Contains(b) || g.Contains(c)).ToList();
+            Func<HashSet<int>, HashSet<HashSet<int>>, IEnumerable<HashSet<int>>> GetIntersecting = (entry, crowd) =>
+            {
+                return crowd.Where(x => entry.Intersect(x).Any());
+            };
 
-                if (intersecting.Count == 0)
-                {
-                    // new group
-                    if (c > 0) groups.Add(new HashSet<int> { a, b, c });
-                    else groups.Add(new HashSet<int> { a, b });
-                }
-                else
-                {
-                    // merge all intersecting groups plus the set into the first one
-                    var target = intersecting.First();
-                    target.Add(a);
-                    target.Add(b);
-                    if (c > 0) target.Add(c);
-
-                    foreach (var g in intersecting.Skip(1))
-                    {
-                        foreach (var id in g)
-                        {
-                            target.Add(id);
-                        }
-                        groups.Remove(g);
-                    }
-                }
-            }
-
-            return groups;
+            Toolbox.FlexFloodProcessor(domains.Values.Select(e => e.ToHashSet()).ToList(), MergeDomains, GetIntersecting);
+            return mergedGroups;
         }
 
         private List<HashSet<int>> MergeAndFilterOutDomains(List<HashSet<int>> groups)
@@ -329,31 +254,40 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             List<HashSet<int>> result = [];
             foreach (var g in groups)
             {
+                int remain = -1;
                 if (g.Count > 1 && g.Any(x => territories[x].toMerge))
                 {
-                    if (g.Any(x => territories[x].isBridge))
+                    var extracted = g.Where(x => territories[x].toMerge).ToHashSet();
+                    var leftovers = g.Where(x => !territories[x].toMerge).ToHashSet();
+                    int replacement = -1;
+                    // If there are at least 2 to merge, then proceed:
+                    if (extracted.Count > 1)
                     {
-                        MergeDomain(g);
-                        continue;
+                        replacement = MergeDomain(extracted);
                     }
-                    var toMergeItems = g.Where(x => territories[x].toMerge).ToHashSet();
-                    var notToMergeItems = g.Where(x => !territories[x].toMerge).ToHashSet();
-                    if (toMergeItems.Count > 1)
-                    {
-                        MergeDomain(toMergeItems);
-                    }
-                    else if (g.Count == 2)
+                    // Somehow, there's only 1 to merge, in which case nothing happens.
+                    else
                     {
                         result.Add(g);
                         continue;
                     }
-                    if (notToMergeItems.Count > 0)
+                    // If there are unmerged items left
+                    if (leftovers.Count > 0)
                     {
-                        result.Add(notToMergeItems);
-                        foreach (var territory in notToMergeItems.Select(x => territories[x]))
+                        // First, fix the now outdated annexedIds registries.
+                        extracted.Remove(replacement);
+                        foreach (var ids in leftovers.Select(x => territories[x].annexedIds))
                         {
-                            territory.annexedIds.RemoveAll(i => toMergeItems.Contains(i));
+                            ids.RemoveAll(extracted.Contains);
                         }
+                        // Bring back the merged territory
+                        if (replacement > 0) leftovers.Add(replacement);
+                        result.Add(leftovers);
+                    }
+                    // All items were merged, so we just put it back as one.
+                    else
+                    {
+                        result.Add(new HashSet<int>() { replacement });
                     }
                 }
                 else
@@ -364,9 +298,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
-        private void MergeDomain(HashSet<int> g)
+        private int MergeDomain(HashSet<int> g)
         {
-            var territory = territories[g.First()];
+            var lead = g.First();
+            var territory = territories[lead];
             List<int> absorbed = [];
             foreach (var i in g.Skip(1))
             {
@@ -374,14 +309,16 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 territory.Absorb(target);
                 absorbed.Add(i);
             }
-            //territory.annexedIds.RemoveAll(i => absorbed.Contains(i));
-            territory.annexedIds.Clear();
+            territory.annexedIds.RemoveAll(absorbed.Contains);
             territory.closeColonyIds.Clear();
+            List<string> absorbedReport = absorbed.Select(x => $"#{x}({territories[x].seed.Name})").ToList();
+            string separator = absorbed.Count() == 2 ? " and " : ", ";
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{string.Join(separator, absorbedReport)} merged into #{territory.id}({territory.seed.Name})");
             foreach (var i in absorbed)
             {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"#{i}({territories[i].seed.Name},  SameOwner={territories[i].SameOwner}) was absorbed by #{territory.id}({territory.seed.Name},  SameOwner={territory.SameOwner}).");
                 territories.Remove(i);
             }
+            return lead;
         }
 
         private Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
@@ -464,7 +401,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     foreach (var neighbor in grouped)
                     {
-                        neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.id));
+                        if (toMerge)
+                        {
+                            neighbor.toMerge = true;
+                        }
+                        else
+                        {
+                            neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.id));
+                        }
                     }
                     var bridged = grouped.Select(x => x.id).ToList();
                     cluster.BridgeFor.AddRange(bridged);
@@ -480,9 +424,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private static bool KeepSequence(List<Territory> set)
         {
-            //Spares certain domain sets from spawning in randomized order: , .
-            return set.Any(x => x.isBridge) // close colonies
-                || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.dlc))); // annexed + DLC
+            //Spares certain domain sets from spawning in randomized order
+            return set.Count > 1
+                && (set.Any(x => x.isBridge) // unmerged close colonies
+                || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.dlc)))); // annexed + DLC
         }
         
         private void TerritoriesReport()
