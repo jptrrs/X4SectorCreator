@@ -35,19 +35,18 @@ namespace X4SectorCreator.Helpers
             return result;
         }
 
-        internal static (int cols, int rows) FrameHexGrid(List<Cluster> allClusters, int margin = 0)
+        internal static (int cols, int rows) FrameHexGrid(List<Cluster> allClusters, int margin = 0, float yFactor = 2f)
         {
             int cols, rows = 0;
-
-            if (allClusters.Count == 0) // Check if the list is empty
+            if (allClusters.Count == 0)
             {
                 cols = (margin * 2) + 1;
-                rows = ((int)(margin / 2 * 1.5f)) + 1;
+                rows = ((int)(margin / 2 * yFactor)) + 1;
             }
             else
             {
-                cols = ((Math.Max(Math.Abs(allClusters.Max(a => a.Position.X)), Math.Abs(allClusters.Min(a => a.Position.X))) + margin) * 2) + 1;
-                rows = ((int)((Math.Max(Math.Abs(allClusters.Max(b => b.Position.Y)), Math.Abs(allClusters.Min(b => b.Position.Y))) + (margin / 2)) * 1.5f)) + 1;
+                cols = ((Math.Max(Math.Abs(allClusters.Max(a => a.Position.X)), Math.Abs(allClusters.Min(a => a.Position.X))) + margin) * 2) + 1; //35 -> maxbound for X is 17
+                rows = ((int)((Math.Max(Math.Abs(allClusters.Max(b => b.Position.Y)), Math.Abs(allClusters.Min(b => b.Position.Y))) + (margin / 2)) * yFactor)) + 1; //41 -> maxbound for Y is 20
             }
             return (cols, rows);
         }

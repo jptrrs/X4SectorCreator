@@ -614,6 +614,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var planned = position.Subtract(currentPos);
                 if (i > 0) position = AdjustForInsertion(territory, planned, branch, direction, occupied, isSequence);
 
+                //Mark the first territory, so its Anchor property doesn't go into a loop of constant re-evaluation.
+                else territory.origin = true;
+
                 //Move the piece
                 var move = position.Subtract(currentPos);
                 var report = territory.Reposition(move);

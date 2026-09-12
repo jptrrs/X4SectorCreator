@@ -12,12 +12,13 @@ namespace X4SectorCreator.Objects
         internal Direction exitDirection;
         internal List<Cluster> bordering = [];
         internal int id, assignedDomainId;
-        internal bool isBridge = false, unconnected = false, overhead = false, toMerge = false;
+        internal bool isBridge = false, origin = false, toMerge = false;
         internal Cluster seed;
         internal Point size = Point.Empty;
         
         private int[] box = new int[4];
         private bool? isNeutral, isVanilla, sameOwner, landlocked;
+        private bool overhead = false, unconnected = false;
         private Point anchor = Point.Empty;
         private (double x, double y) center;
         private HashSet<Cluster> exitClusters = [];
@@ -51,7 +52,7 @@ namespace X4SectorCreator.Objects
         {
             get
             {
-                if (anchor.IsEmpty) SetUpBox();
+                if (!origin && anchor.IsEmpty) SetUpBox();
                 return anchor;
             }
             set
@@ -190,7 +191,7 @@ namespace X4SectorCreator.Objects
                 cluster.shuffled = true;
                 log.Add($"{cluster.Name} {cluster.Position.ToTuple()}");
             }
-            return $"Moving {Clusters.Count} clusters: {string.Join(", ", log.ToArray())}";
+            return $"Anchored @ {Anchor.ToTuple()}, moving {Clusters.Count} clusters: {string.Join(", ", log.ToArray())}";
         }
 
         internal void Rotate(int turns)
@@ -217,8 +218,7 @@ namespace X4SectorCreator.Objects
             var width = box[0] - box[2] + 1;
             var height = box[3] - box[1] + 2;
             var corner = new Point(box[2], box[3]);
-            var anchor = corner.FitToHex();
-            Anchor = anchor;
+            anchor = corner.FitToHex();
             size = new Point(width, height);
             overhead = anchor.Y > box[3];
             double centerX = corner.X + (width - 1) / 2.0;
