@@ -1,3 +1,4 @@
+using System.Reflection;
 using X4SectorCreator.Objects;
 
 namespace X4SectorCreator.Helpers
@@ -45,8 +46,8 @@ namespace X4SectorCreator.Helpers
             }
             else
             {
-                cols = ((Math.Max(Math.Abs(allClusters.Max(a => a.Position.X)), Math.Abs(allClusters.Min(a => a.Position.X))) + margin) * 2) + 1; //35 -> maxbound for X is 17
-                rows = ((int)((Math.Max(Math.Abs(allClusters.Max(b => b.Position.Y)), Math.Abs(allClusters.Min(b => b.Position.Y))) + (margin / 2)) * yFactor)) + 1; //41 -> maxbound for Y is 20
+                cols = ((Math.Max(Math.Abs(allClusters.Max(a => a.Position.X)), Math.Abs(allClusters.Min(a => a.Position.X))) + margin) * 2) + 1;
+                rows = ((int)((Math.Max(Math.Abs(allClusters.Max(b => b.Position.Y)), Math.Abs(allClusters.Min(b => b.Position.Y))) + (margin / 2)) * yFactor)) + 1;
             }
             return (cols, rows);
         }
@@ -69,7 +70,7 @@ namespace X4SectorCreator.Helpers
             pivot = PivotForRotation(pivot);
             double dx = current.X - pivot.X;
             double dy = current.Y - pivot.Y;
-            (double x, double y) rotated = (0d,0d);
+            (double x, double y) rotated = (0d, 0d);
             if (turns == 2) //180° Rotation
             {
                 rotated = (pivot.X - dx, pivot.Y - dy);
@@ -94,9 +95,6 @@ namespace X4SectorCreator.Helpers
 
         public static Point RotateOrtho(Point current, Point pivot, int turns)
         {
-            // Normalize turns to 0-3 range (4 rotations = 360°)
-            turns = ((turns % 4) + 4) % 4;
-
             // Translate point relative to the center origin
             double dx = current.X - pivot.X;
             double dy = current.Y - pivot.Y;
@@ -111,6 +109,36 @@ namespace X4SectorCreator.Helpers
             };
 
             return new Point((int)Math.Round(rx, MidpointRounding.AwayFromZero), (int)Math.Round(ry, MidpointRounding.AwayFromZero));
+        }
+
+        public static Dictionary<(Cluster, Cluster), float> BridgedParwiseDistances(List<Cluster> outgoing, List<Cluster> desired, float limit)
+        {
+            List<Cluster> rejectedonce = [], paired = [];
+            Dictionary<(Cluster, Cluster), float> results = [];
+            for (int i = 0; i < outgoing.Count; i++)
+            {
+                Cluster origin = outgoing[i];
+                for (int j = 0; j < desired.Count; j++)
+                {
+                    Cluster destination = desired[j];
+                    if (!origin.SameTerritoryAs(destination))
+                    {
+                        float dist = origin.Position.DistanceSquared(destination.Position);
+                        if (limit < 0 || dist < limit) results.TryAdd((origin, destination), dist);
+                        //paired.Add(outgoing[i]);
+                        //paired.Add(desired[j]);
+                    }
+                    //else
+                    //{
+                    //    rejectedonce.Add(outgoing[i]);
+                    //}
+                }
+            }
+            //test
+            //List<string> intersect = rejectedonce.Intersect(paired).Select(x => x.ToString()).ToList();
+            //List<string> noedges = rejectedonce.Where(x => !paired.Contains(x)).Select(x => x.ToString()).ToList();
+            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Rejected just once: {string.Join(", ",intersect)}.\nTotally rejected: {string.Join(", ",noedges)}");
+            return results;
         }
     }
 }

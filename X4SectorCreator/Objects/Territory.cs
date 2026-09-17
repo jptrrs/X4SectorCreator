@@ -12,13 +12,15 @@ namespace X4SectorCreator.Objects
         internal Direction exitDirection;
         internal List<Cluster> bordering = [];
         internal int id, assignedDomainId;
-        internal bool isBridge = false, origin = false, toMerge = false;
+        internal bool isBridge = false, origin = false, toMerge = false, unconnected = false;
         internal Cluster seed;
         internal Point size = Point.Empty;
+        internal List<Cluster> absorbedExits = [];
+        internal HashSet<int> neighbors = [];
         
         private int[] box = new int[4];
         private bool? isNeutral, isVanilla, sameOwner, landlocked;
-        private bool overhead = false, unconnected = false;
+        private bool overhead = false;
         private Point anchor = Point.Empty;
         private (double x, double y) center;
         private HashSet<Cluster> exitClusters = [];
@@ -88,23 +90,19 @@ namespace X4SectorCreator.Objects
                 {
                     connections.Add((cluster, exit.origin, exit.gate, exit.destination));
                     bordering.AddUnique(cluster);
+                    neighbors.Add(exit.destination.AssignedTerritoryId);
                 }
             }
-            if (connections.Count == 0)
-            {
-                unconnected = true;
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"WARNING: #{id} - {seed.Name} has no connections to other territories.");
-            }
+            if (connections.Count == 0) unconnected = true;
         }
 
-        internal HashSet<Cluster> ExitClusters
+        internal HashSet<Cluster> ExitClusters //This is persistent once set for the 1st time.
         {
             get
             {
                 if (exitClusters.Count == 0)
                 {
-                    var exits = Connections;
-                    if (exits != null)
+                    if (Connections != null)
                     {
                         exitClusters = Connections?.Select(x => x.cluster).ToHashSet();
                     }
@@ -175,7 +173,7 @@ namespace X4SectorCreator.Objects
             {
                 if (landlocked == null)
                 {
-                    landlocked = Connections.Count > 0 && Connections.All(c => c.origin.CurrentOwner.Equals(c.destination.CurrentOwner, StringComparison.OrdinalIgnoreCase));
+                    landlocked = Connections.Count > 0 && Connections.All(x => x.origin.CurrentOwner.Equals(x.destination.CurrentOwner, StringComparison.OrdinalIgnoreCase));
                 }
                 return (bool)landlocked;
             }
@@ -253,54 +251,79 @@ namespace X4SectorCreator.Objects
             var relevant = peers.Count > 0 ? bordering.Where(c => c.Destinations.Any(s => peers.Contains(s.AssignedTerritoryId) == restricted)) : bordering;
             foreach (var c in relevant)
             {
+                //localized results
+                int cVoteUp = 0;
+                int cVoteDown = 0;
+                int cVoteRight = 0;
+                int cVoteLeft = 0;
+
                 //Cluster position relative to its territory
-                if (c.Position.X < center.x) voteLeft++;
-                else if (c.Position.X > center.x) voteRight++;
-                if (c.Position.Y > center.y) voteUp++;
-                else if (c.Position.Y < center.y) voteDown++;
+                if (c.Position.X < center.x) cVoteLeft++;
+                else if (c.Position.X > center.x) cVoteRight++;
+                if (c.Position.Y > center.y) cVoteUp++;
+                else if (c.Position.Y < center.y) cVoteDown++;
 
                 //Destinations relative cluster position
                 //The more destinations from a cluster, bigger weight given to this.
                 foreach (var s in c.Destinations)
                 {
                     if (peers.Contains(s.AssignedTerritoryId) != restricted) continue;
-                    var d = s.FindCluster();
+                    var d = s.Parent;
                     if (accountedFor.Contains(d)) continue; //so we don't double-count
-                    if (c.Position.X < d.Position.X) voteRight++;
-                    else if (c.Position.X > d.Position.X) voteLeft++;
-                    if (c.Position.Y > d.Position.Y) voteDown++;
-                    else if (c.Position.Y < d.Position.Y) voteUp++;
+                    if (c.Position.X < d.Position.X) cVoteRight++;
+                    else if (c.Position.X > d.Position.X) cVoteLeft++;
+                    if (c.Position.Y > d.Position.Y) cVoteDown++;
+                    else if (c.Position.Y < d.Position.Y) cVoteUp++;
                     accountedFor.Add(d);
                 }
+
+                //Register the cluster vocation for later.
+                c.Direction = (int)ResolveDirection(cVoteUp, cVoteDown, cVoteRight, cVoteLeft, true, true);
+
+                //Transfer votes for the overall direction.
+                voteUp += cVoteUp;
+                voteDown += cVoteDown;
+                voteRight += cVoteRight;
+                voteLeft += cVoteLeft;
             }
-            Direction vOption = exitDir;
-            if (size.Y > 2)
+            bool checkVertical = size.Y > 2;
+            bool checkHorizontal = size.X > 1;
+
+            exitDirection = ResolveDirection(voteUp, voteDown, voteRight, voteLeft, checkVertical, checkHorizontal);
+        }
+
+        private Direction ResolveDirection(int voteUp, int voteDown, int voteRight, int voteLeft, bool checkVertical, bool checkHorizontal)
+        {
+            var result = Direction.Undefined;
+            var vOption = Direction.Undefined;
+            var hOption = Direction.Undefined;
+            if (checkVertical)
             {
                 if (voteUp > 0 && voteDown < voteUp) vOption = Direction.Up;
                 if (voteDown > 0 && voteDown > voteUp) vOption = Direction.Down;
             }
-            Direction hOption = exitDir;
-            if (size.X > 1)
+            if (checkHorizontal)
             {
                 if (voteRight > 0 && voteRight > voteLeft) hOption = Direction.Right;
                 if (voteLeft > 0 && voteRight < voteLeft) hOption = Direction.Left;
             }
-            if (vOption == Direction.Undefined) exitDir = hOption;
-            else if (hOption == Direction.Undefined) exitDir = vOption;
+            if (vOption == Direction.Undefined) result = hOption;
+            else if (hOption == Direction.Undefined) result = vOption;
             else
             {
                 var goV = voteUp + voteDown;
                 var goH = voteLeft + voteRight;
-                if (goV > goH) exitDir = vOption;
-                else exitDir = hOption;
+                if (goV > goH) result = vOption;
+                else result = hOption;
             }
-            exitDirection = exitDir;
+            return result;
         }
 
         internal void Absorb(Territory other)
         {
             if (other == null) return;
             var clusters = other.Clusters.ToList();
+            absorbedExits.AddRange(other.ExitClusters);
             foreach (var cluster in clusters)
             {
                 Clusters.Add(cluster);

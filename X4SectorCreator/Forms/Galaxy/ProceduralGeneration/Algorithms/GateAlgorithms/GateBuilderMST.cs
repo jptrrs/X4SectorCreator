@@ -1,4 +1,6 @@
-﻿using X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Helpers;
+﻿using System.Collections.Generic;
+using System.Windows.Forms.VisualStyles;
+using X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Helpers;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
 
@@ -10,30 +12,30 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
         private readonly ProceduralSettings _settings = settings;
         private const int GateMinDistanceFromCenter = /*75000*/100000;
 
+        internal HashSet<Cluster> connected = [];
+
+        // Split this into smaller steps, so some of it could be repurposed. But I ended up not needing it, so most these changes could totally be ignored.
         public void Generate(List<Cluster> clusters)
         {
             // Generate based on selected distribution
-            int count = clusters.Count;
 
             // Step 1: Build all pairwise distances
-            var edges = new List<(Cluster A, Cluster B, float Distance)>();
-            for (int i = 0; i < count; i++)
-            {
-                for (int j = i + 1; j < count; j++)
-                {
-                    // Skip pair if same territory, a check needed when shuffling.
-                    if (clusters[i].SameTerritoryAs(clusters[j]))
-                        continue;
-                    float dist = clusters[i].Position.DistanceSquared(clusters[j].Position);
-                    edges.Add((clusters[i], clusters[j], dist));
-                }
-            }
+            List<(Cluster A, Cluster B, float Distance)> edges = SortedPairwiseDistances(clusters);
 
             // Step 2: Build MST using Kruskal's algorithm
-            edges.Sort((a, b) => a.Distance.CompareTo(b.Distance));
-            var mstEdges = new List<(Cluster A, Cluster B, float Distance)>();
-            var uf = new UnionFind<int>(Enumerable.Range(0, clusters.Count));
+            List<(Cluster A, Cluster B, float Distance)> mstEdges = KruskalMST(clusters, edges, edge => AddGate(edge.A, edge.A.Sectors.First(), edge.B, edge.B.Sectors.First()));
 
+            // Step 3: Connect any missing sectors that didn't cut the initial generation
+            foreach (var cluster in clusters) ConnectMissingSectors(cluster);
+
+            // Step 4: Add extra gates up to maxGatesPerCluster by chance
+            AddExtraGates(clusters, edges, mstEdges);
+        }
+
+        internal static List<(Cluster A, Cluster B, float Distance)> KruskalMST(List<Cluster> clusters, List<(Cluster A, Cluster B, float Distance)> edges, Action<(Cluster A, Cluster B)> onEdgeAdded)
+        {
+            List<(Cluster A, Cluster B, float Distance)> results = [];
+            var uf = new UnionFind<int>(Enumerable.Range(0, clusters.Count));
             for (int i = 0; i < edges.Count; i++)
             {
                 var (a, b, dist) = edges[i];
@@ -42,17 +44,29 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
 
                 if (uf.Union(idxA, idxB))
                 {
-                    mstEdges.Add((a, b, dist));
-                    AddGate(a, a.Sectors.First(), b, b.Sectors.First());
+                    results.Add((a, b, dist));
+                    onEdgeAdded((a, b));
                 }
             }
+            return results;
+        }
 
-            // Step 3: Connect any missing sectors that didn't cut the initial generation
-            foreach (var cluster in clusters)
-                ConnectMissingSectors(cluster);
-
-            // Step 4: Add extra gates up to maxGatesPerCluster by chance
-            AddExtraGates(clusters, edges, mstEdges);
+        internal static List<(Cluster A, Cluster B, float Distance)> SortedPairwiseDistances(List<Cluster> clusters, bool preventDomestic = false)
+        {
+            var results = new List<(Cluster A, Cluster B, float Distance)>();
+            var count = clusters.Count;
+            for (int i = 0; i < count; i++)
+            {
+                for (int j = i + 1; j < count; j++)
+                {
+                    // Skip pair if same territory, a check needed when shuffling.
+                    if (preventDomestic && clusters[i].SameTerritoryAs(clusters[j])) continue;
+                    float dist = clusters[i].Position.DistanceSquared(clusters[j].Position);
+                    results.Add((clusters[i], clusters[j], dist));
+                }
+            }
+            results.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+            return results;
         }
 
         private void AddExtraGates(List<Cluster> clusters, List<(Cluster A, Cluster B, float Distance)> edges, List<(Cluster A, Cluster B, float Distance)> mstEdges)
@@ -130,7 +144,7 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
             }
         }
 
-        private void AddGate(Cluster sourceCluster, Sector sourceSector, Cluster targetCluster, Sector targetSector)
+        internal void AddGate(Cluster sourceCluster, Sector sourceSector, Cluster targetCluster, Sector targetSector)
         {
             var directionSource = sourceCluster.Position.Add(sourceSector.PlacementDirection);
             if (sourceCluster.Sectors.Count == 1)
@@ -189,6 +203,10 @@ namespace X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgor
             targetGate.SetDestinationPath("PREFIX", sourceCluster, sourceSector, sourceZone, sourceGate);
             sourceGate.SetSourcePath("PREFIX", sourceCluster, sourceSector, sourceZone);
             sourceGate.SetDestinationPath("PREFIX", targetCluster, targetSector, targetZone, targetGate);
+
+            // Feedback
+            connected.Add(sourceCluster);
+            connected.Add(targetCluster);
         }
 
         private static string ConvertToPath(Cluster cluster, Sector sector, Zone zone)

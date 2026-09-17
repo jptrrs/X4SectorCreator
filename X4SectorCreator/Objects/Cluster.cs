@@ -39,11 +39,14 @@ namespace X4SectorCreator.Objects
 </components>";
 
         internal bool shuffled = false;
-        internal List<Sector> Destinations = [];
-        internal List<Sector> Exits = [];
+        internal List<Sector> Destinations = [], Exits = [], FormerExits = [];
         internal List<int> BridgeFor = [];
         internal Point AnchorOffset = Point.Empty;
+        internal int Direction = 0;
         private Point? plannedPosition;
+
+        [JsonIgnore]
+        internal List<Sector> PossibleExits => Exits.Concat(FormerExits).ToList();
 
         [JsonIgnore]
         internal cPoint cPosition => (cPoint)Position;
@@ -62,26 +65,8 @@ namespace X4SectorCreator.Objects
         }
 
         [JsonIgnore]
-        public int AssignedTerritoryId
-        {
-            get
-            {
-                return assignedTerritoryId;
-            }
-            set
-            {
-                assignedTerritoryId = value;
-                if (Sectors.Any())
-                {
-                    foreach (var sector in Sectors)
-                    {
-                        sector.AssignedTerritoryId = value;
-                    }
-                }
-            }
-        }
+        public int AssignedTerritoryId { get; set; }
 
-        private int assignedTerritoryId = -1;
         private Point position;
 
         [JsonIgnore]
@@ -107,6 +92,7 @@ namespace X4SectorCreator.Objects
             }
             set
             {
+                FormerExits.AddRangeUnique(Exits);
                 Exits.Clear();
                 Destinations.Clear();
                 foreach (var item in value)
@@ -218,19 +204,27 @@ namespace X4SectorCreator.Objects
 
         internal void FollowUpRotation(int turns)
         {
+            // Normalize turns to 0-3 range (4 rotations = 360°)
+            turns = ((turns % 4) + 4) % 4;
+            if (turns == 0) return;
+
             bool doPlacement = Sectors.Count > 1;
             foreach (Sector sector in Sectors)
             {
-                if (doPlacement) sector.RotatePlacementOrtho(turns);
+                if (doPlacement) sector.RotatePlacementOrtho(turns); //n
                 foreach (Zone zone in sector.Zones)
                 {
-                    zone.Position = ClusterManager.RotateOrtho(zone.Position, Point.Empty, turns);
+                    zone.Position = ClusterManager.RotateOrtho(zone.Position, Point.Empty, turns); //n
                     zone.Gates.ForEach(gate => gate.UpdateFacing(turns));
                 }
                 foreach (Region region in sector.Regions)
                 {
                     region.Position = ClusterManager.RotateOrtho(region.Position, Point.Empty, turns);
                 }
+            }
+            if (Direction > 0)
+            {
+                Direction = (Direction + turns) % 4;
             }
         }
     }

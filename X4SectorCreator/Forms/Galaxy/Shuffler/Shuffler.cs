@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
@@ -22,6 +23,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         ];
         private static (int cols, int rows) hexGridFrame;
         private static int squareBoundary = -1;
+        private static float gateMaxDist = 30f;
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
         {
             return !territory.Clusters.Contains(cluster);
@@ -46,7 +48,17 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private Dictionary<string, List<int>> staged = [];
         private Dictionary<int, Territory> territories = [];
         private static Dictionary<string, string> policeFactions = [];
-        
+
+        private Dictionary<int, HashSet<Cluster>> gatesNetwork = [];
+        private GateBuilderMST GateBuilder = new GateBuilderMST(new ProceduralSettings
+        {
+            Seed = Localisation.GetFnvHash(Random.Shared.Next().ToString()),
+            MinGatesPerSector = 1,
+            MaxGatesPerSector = 1,
+            GateMultiChancePerSector = 0
+        });
+
+
 
         //TO DO:
         // 2. Rever conexões, tentar garantir que domínios fiquem inter-conectados.
@@ -69,6 +81,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Consolidate neighbouring territories into one (following DLC criteria) or under merged domains (if owner is shared).
             ConsolidateDomains();
 
+            // Now we're able to calculate territories' preferred orientations:
+            InferOrientations();
+
             // Report results so far
             TerritoriesReport();
 
@@ -76,7 +91,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Shuffle();
 
             // Weave a new network between territories.
-            Reconnect();
+            //Reconnect();
 
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
@@ -206,9 +221,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 consolidated.Add(idx++, g.OrderBy(x => Random.Shared.Next()).ToList()/*SequencedDomainFromHash(idx, g)*/);
             }
             domains = DesignatedDomains(consolidated);
-
-            //Now we're able to calculate territories' preferred orientations:
-            InferOrientations();
 
             // logging
             count += domains.Count - idx;
@@ -529,10 +541,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            var slots = new Queue<(Point pos, string path)>([(Point.Empty, "")]);
-            var deferred = new Queue<(Point pos, string add)>();
-            SortedSet<cPoint> occupied = new SortedSet<cPoint>();
-            bool inBounds = true;
+            Queue<(Point pos, string path)> slots = new ([(Point.Empty, "")]);
+            Queue<(Point pos, string add)> deferred = [];
+            SortedSet<cPoint> occupied = [];
+            bool inBounds = true, firstRun = true;
+            List<Cluster> orphanedRoads = [], secondaryRoads = [], unconnected = [];
 
             bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
@@ -575,11 +588,60 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         else
                         {
                             //end of the line
-                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots! Staged domains left out: {$"{string.Join(", ",staged.Values.Select(x => $"[{string.Join(", ",x)}]"), true)}"}");
+                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots! Staged domains left out: {$"{string.Join(", ", staged.Values.Select(x => $"[{string.Join(", ", x)}]"), true)}"}");
                         }
                     }
                 }
                 return flag;
+            }
+
+            void Reconnect(Territory territory)
+            {
+                HashSet<Cluster> outgoing = [];
+                if (territory.ExitGates != null && !territory.isBridge)
+                {
+                    foreach (var link in territory.Connections)
+                    {
+                        outgoing.Add(link.cluster);
+                        var gate = link.gate;
+                        var zone = gate.ParentZone;
+                        zone.Gates.Remove(gate);
+                    }
+
+                    bool connected = false;
+                    if (!firstRun)
+                    {
+                        //First, try known & close paths
+                        var bridge = FindBridge(outgoing, orphanedRoads, out connected, gateMaxDist);
+                        if (connected)
+                        {
+                            //Take destination out of queue and into secondary.
+                            orphanedRoads.Remove(bridge.to);
+                            secondaryRoads.Add(bridge.to);
+                        }
+                        else
+                        {
+                            //Then, attempt undesirable but close paths
+                            bridge = FindBridge(outgoing, secondaryRoads, out connected, gateMaxDist);
+                        }
+                        //update lists in all cases
+                        if (connected) 
+                        {
+                            outgoing.Remove(bridge.from);
+                            secondaryRoads.Add(bridge.from);
+                            secondaryRoads.AddRange(outgoing);
+                        }
+                        _ = Toolbox.LogAsync(level, $"Attempt to reconnect {territory.seed.Name}: {(connected ? $"SUCESS! Connected to {bridge.to}" : $"FAILED! Outgoing clusters: {outgoing.Count()}")}.");
+                    }
+                    if (!connected)
+                    {
+                        orphanedRoads.AddRange(outgoing);
+                    }
+                    _ = Toolbox.LogAsync(level, $"loop probe:\n{orphanedRoads.Count} orphaned: {string.Join(", ", orphanedRoads)},\n{secondaryRoads.Count} secondary: {string.Join(", ", secondaryRoads)}.");
+
+                }
+                if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
+                territory.SetUpConnections();
             }
 
             for (int i = 0; i < cards.Count; i++)
@@ -612,7 +674,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 //Fine-tune the insertion spot so it fits right in.
                 var currentPos = territory.Anchor;
                 var planned = position.Subtract(currentPos);
-                if (i > 0) position = AdjustForInsertion(territory, planned, branch, direction, occupied, isSequence);
+                if (!firstRun) position = AdjustForInsertion(territory, planned, branch, direction, occupied, isSequence);
 
                 //Mark the first territory, so its Anchor property doesn't go into a loop of constant re-evaluation.
                 else territory.origin = true;
@@ -624,7 +686,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
                 //Keep track of occupied areas
                 var covered = territory.Contour;
-                if (i == 0) occupied.Clear();
+                if (firstRun) occupied.Clear();
                 occupied.UnionWith(covered);
                 occupiedMax = occupied.Max;
 
@@ -636,7 +698,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 _ = Toolbox.LogAsync(level, $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical, totalling {occupied.Count} now.");
 
                 //Update the board.
-                UpdateClusterMap(territory.Clusters, i);
+                UpdateClusterMap(territory.Clusters);
+
+                //Redo connections
+                Reconnect(territory);
 
                 //Prepare the next slots.
                 var nextSlots = NextSlotsHelix(territory, occupied, path);
@@ -646,10 +711,27 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     if (InBounds(pos) || isSequence) slots.Enqueue((pos, add));
                     else deferred.Enqueue((pos, add));
                 }
+                firstRun = false;
+            }
+            //FuseNetworks(shouldConnect);
+            foreach (var cluster in orphanedRoads.Where(x => x.PossibleExits.Count == 0))
+            {
+                _ = Toolbox.LogAsync(level, $"{cluster} doesn't have any possible connection point, exluding it from the network. Former exits: {cluster.FormerExits.Count}");
+            }
+            orphanedRoads.RemoveAll(x => x.PossibleExits.Count == 0);
+            SupplementBridges(ref orphanedRoads,secondaryRoads);
+            //foreach (var territory in territories.Values)
+            //{
+            //    territory.SetUpConnections();
+            //}
+
+            if (orphanedRoads.Count > 0)
+            {
+                _ = Toolbox.LogAsync(level, $"Failed to connect: {string.Join(", ", orphanedRoads)}.");
             }
             HandleMisplaced();
         }
-        
+
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
         {
             Point result = Point.Empty;
@@ -747,7 +829,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     else
                     {
                         _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it by {adjust.ToTuple()}.");
-                      }
+                    }
                 }
                 //Move to avoid overlaps...
                 offset = offset.Add(adjust);
@@ -1128,7 +1210,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return singleTile ? !occupied.Contains(position) : !SimpleCollision(occupied, position, width, height);
         }
 
-        private void UpdateClusterMap(List<Cluster> clusters, int errorY = 0)
+        private void UpdateClusterMap(List<Cluster> clusters)
         {
             foreach (var c in clusters)
             {
@@ -1143,30 +1225,64 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         #endregion
 
         #region Reconnections
-
-        internal void Reconnect()
+        private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f)
         {
-            var settings = new ProceduralSettings
-            {
-                Seed = Localisation.GetFnvHash(Random.Shared.Next().ToString()),
-                MinGatesPerSector = 1,
-                MaxGatesPerSector = 1,
-                GateMultiChancePerSector = 0
-            };
-            List<Cluster> clusters = [];
-            foreach (var territory in territories.Values)
-            {
-                if (territory.ExitGates == null || territory.isBridge) continue;
-                foreach (var gate in territory.ExitGates)
-                {
-                    var zone = gate.ParentZone;
-                    zone.Gates.Remove(gate);
-                }
-                clusters.AddRange(territory.ExitClusters);
-            }
-            var mst = new GateBuilderMST(settings);
-            mst.Generate(clusters);
+            (Cluster, Cluster) result = (null, null);
+            var outgoing = outgoingHash.Where(x => x.PossibleExits.Count > 0).ToList();
+            desired = desired.Where(x => x.PossibleExits.Count > 0).ToList();
+            if (outgoing.Count == 0 || desired.Count == 0) goto finish;
+
+            Dictionary<(Cluster, Cluster), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit);
+            if (edges.Count == 0) goto finish;
+            var ((origin, destination), _) = edges.MinBy(x => x.Value);
+            GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
+            result = (origin, destination);
+
+            finish:
+            flag = (result.Item1 != null && result.Item2 != null);
+            return result;
         }
+
+        private bool SupplementBridges(ref List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
+        {
+            bool result = false;
+            if (outgoing.Count == 0 || desired.Count == 0) goto finish;
+
+            Dictionary<(Cluster from, Cluster to), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit);
+            if (edges.Count == 0) goto finish;
+
+            List<Cluster> plugged = [];
+            foreach (var origin in outgoing)
+            {
+                var subset = edges.Where(x => x.Key.from == origin).ToDictionary();
+                if (subset.Count == 0) continue;
+                (Cluster from, Cluster to) route;
+                Cluster destination;
+                do
+                {
+                    route = subset.MinBy(x => x.Value).Key;
+                    destination = route.to;
+                    subset.Remove(route);
+                }
+                while (subset.Count > 0 && territories[origin.AssignedTerritoryId].neighbors.Contains(destination.AssignedTerritoryId));
+                if (destination == null) continue;
+                GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
+                edges.Remove(route);
+                var taken = edges.Keys.Where(k => k.from == route.from).ToList();
+                foreach (var key in taken)
+                {
+                    edges.Remove(key);
+                }
+                desired.Remove(destination); //just one bridge there per execution.
+                plugged.Add(origin);
+            }
+            outgoing = outgoing.Except(plugged).ToList();
+            result = true;
+
+            finish:
+            return result;
+        }
+
 
         #endregion
     }

@@ -24,7 +24,22 @@ namespace X4SectorCreator.Objects
         public SectorPlacement Placement { get; set; }
 
         private string currentOwner;
+        private Cluster parent;
         internal Dictionary<Sector, Gate> Destinations = new Dictionary<Sector, Gate>();
+
+        [JsonIgnore]
+        internal Cluster Parent
+        {
+            get
+            {
+                if (parent == null)
+                {
+                    parent = MainForm.Instance.AllClusters.Values.FirstOrDefault(cluster => cluster.Sectors.Contains(this));
+                }
+                return parent;
+            }
+        }
+           
 
         [JsonIgnore]
         internal string CurrentOwner
@@ -59,7 +74,7 @@ namespace X4SectorCreator.Objects
         }
 
         [JsonIgnore]
-        public int AssignedTerritoryId = -1;
+        public int AssignedTerritoryId => Parent.AssignedTerritoryId;
 
         [JsonIgnore]
         public Point PlacementDirection => DeterminePlacementDirection();
@@ -195,13 +210,6 @@ namespace X4SectorCreator.Objects
             return Name ?? "Unknown";
         }
 
-        //A bit of self-awareness
-        public Cluster FindCluster()
-        {
-            return MainForm.Instance.AllClusters.Values
-                    .FirstOrDefault(cluster => cluster.Sectors.Contains(this));
-        }
-
         public void RotatePlacementOrtho(int turns)
         {
             // Guarantee the default vaule is actually positioned
@@ -209,10 +217,6 @@ namespace X4SectorCreator.Objects
             {
                 Placement = SectorPlacement.TopLeft;
             }
-
-            // Normalize turns to 0-3 range (4 rotations = 360°)
-            turns = ((turns % 4) + 4) % 4;
-            if (turns == 0) return;
 
             // Index 0 = 1 turn (90°), Index 1 = 2 turns (180°), Index 2 = 3 turns (270°)
             var rotationMap = new Dictionary<SectorPlacement, SectorPlacement[]>

@@ -126,7 +126,13 @@ namespace X4SectorCreator.XmlGeneration
 
                             Sector sourceSector = clusters
                                 .SelectMany(a => a.Sectors)
-                                .First(a => a.Name.Equals(gate.DestinationSectorName, StringComparison.OrdinalIgnoreCase));
+                                .FirstOrDefault(a => a.Name.Equals(gate.DestinationSectorName, StringComparison.OrdinalIgnoreCase));
+
+                            if (sourceSector == null)
+                            {
+                                throw new Exception($"Gate \"{cluster.Name}/{sector.Name}/z{zone.Id}/g{gate.Id:D3}\" references a destination sector \"{gate.DestinationSectorName}\" that does not exist.");
+                            }
+
                             Zone sourceZone = sourceSector.Zones
                                 .First(a => a.Gates
                                     .Any(a => a.SourcePath
