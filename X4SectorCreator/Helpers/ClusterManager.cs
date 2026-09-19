@@ -125,19 +125,9 @@ namespace X4SectorCreator.Helpers
                     {
                         float dist = origin.Position.DistanceSquared(destination.Position);
                         if (limit < 0 || dist < limit) results.TryAdd((origin, destination), dist);
-                        //paired.Add(outgoing[i]);
-                        //paired.Add(desired[j]);
                     }
-                    //else
-                    //{
-                    //    rejectedonce.Add(outgoing[i]);
-                    //}
                 }
             }
-            //test
-            //List<string> intersect = rejectedonce.Intersect(paired).Select(x => x.ToString()).ToList();
-            //List<string> noedges = rejectedonce.Where(x => !paired.Contains(x)).Select(x => x.ToString()).ToList();
-            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Rejected just once: {string.Join(", ",intersect)}.\nTotally rejected: {string.Join(", ",noedges)}");
             return results;
         }
     }

@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Immutable;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
@@ -56,11 +57,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             GateMultiChancePerSector = 0
         });
 
-
-
-        //TO DO:
-        // 2. Rever conexões, tentar garantir que domínios fiquem inter-conectados.
-
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
             // Gather some basic info
@@ -87,9 +83,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             // Shuffle!
             Shuffle();
-
-            // Weave a new network between territories.
-            //Reconnect();
 
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
@@ -540,6 +533,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             SortedSet<cPoint> occupied = [];
             bool inBounds = true, firstRun = true;
             List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
+            List<ImmutableList<int>> domainsList = domains.Values.Where(x => x.Count > 1).Select(x => x.ToImmutableList()).ToList();
+
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"TEST: Consolidated {domainsList.Count} domain(s): {string.Join("; ", domainsList.Select(x => $"[{string.Join(',', x)}]"))}.");
+
 
             bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
@@ -713,7 +710,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 territory.SetUpConnections();
             }
-            StitchNetwork(FindNetworks());
+            StitchNetwork(FindNetworks(territories.Values.ToList()));
+            foreach (var set in domainsList)
+            {
+                StitchNetwork(FindNetworks(set.Select(x => territories[x]).ToList()));
+            }
         }
 
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
@@ -1217,7 +1218,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var outgoing = outgoingHash.Where(x => x.PossibleExits.Count > 0).ToList();
             desired = desired.Where(x => x.PossibleExits.Count > 0).ToList();
             if (outgoing.Count == 0 || desired.Count == 0) goto finish;
-
             Dictionary<(Cluster, Cluster), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit);
             if (edges.Count == 0) goto finish;
             var ((origin, destination), _) = edges.MinBy(x => x.Value);
@@ -1269,7 +1269,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
-        private List<List<int>> FindNetworks()
+        private List<List<int>> FindNetworks(List<Territory> territories)
         {
             List<List<int>> groups = [];
 
@@ -1289,12 +1289,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 return crowd.Where(x => subject.neighbors.Contains(x.id));
             };
 
-            Toolbox.FlexFloodProcessor(territories.Values.ToList(), SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
+            Toolbox.FlexFloodProcessor(territories, SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
 
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(", ",groups.Select(x => $"\n{x.Count()} total")));
+            //logging
+            int count = groups.Count;
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count>1 ? $"{count} groups" : "only one group")} out of {territories.Count} territories.");
 
             return groups;
-        }
+        }   
 
         private void StitchNetwork(List<List<int>> patches)
         {
@@ -1322,7 +1324,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var entry = remaining.First();
                 var outHash = entry.Value;
                 var destList = remaining.Where(x => x.Key != entry.Key).SelectMany(x => x.Value).ToList();
-                var bridge = FindBridge(outHash, destList, out bool bridged);
+                var bridge = FindBridge(outHash, destList, out bool bridged, gateMaxDist * 3);
                 remaining.Remove(entry.Key);
                 if (bridged)
                 {
