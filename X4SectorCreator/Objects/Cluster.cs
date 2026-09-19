@@ -92,71 +92,26 @@ namespace X4SectorCreator.Objects
             set
             {
                 FormerExits.AddRangeUnique(Exits);
-
-                Exits = new List<Sector>();
-                Destinations = new List<Sector>();
-
+                Exits.Clear();
+                Destinations.Clear();
                 if (value == null) return;
-
-                // Group incoming entries by origin sector id (avoid nulls)
                 var groups = value
-                    .Where(it => it.origin != null && it.gate != null && it.destination != null)
-                    .GroupBy(it => it.origin.Id);
-
+                    .Where(link => link.origin != null && link.gate != null && link.destination != null)
+                    .GroupBy(link => link.origin);
                 foreach (var group in groups)
                 {
-                    var originId = group.Key;
-
-                    // Find canonical origin in this cluster (fall back to provided origin)
-                    var originSector = Sectors.FirstOrDefault(s => s.Id == originId) ?? group.First().origin;
-
-                    Exits.AddUnique(originSector);
-
-                    // Clear existing mappings for this origin to avoid stale entries
-                    originSector.Destinations.Clear();
-
+                    var sector = group.Key;
+                    Exits.AddUnique(sector);
+                    sector.Destinations.Clear();
                     foreach (var item in group)
                     {
                         var gate = item.gate;
-
-                        // Resolve canonical destination sector using the gate helper (searches AllClusters by name)
-                        var canonicalDest = gate.FindDestination(out var destCluster);
-                        // If not found by name, fall back to provided destination reference
-                        if (canonicalDest == null || string.IsNullOrWhiteSpace(canonicalDest.Name))
-                        {
-                            canonicalDest = item.destination;
-                        }
-
-                        Destinations.AddUnique(canonicalDest);
-
-                        // Ensure gate references point to canonical objects
-                        gate.ParentSector = originSector;
-                        gate.ParentZone = gate.ParentZone ?? originSector.Zones.FirstOrDefault(z => z.Gates.Contains(gate));
-
-                        // Use assignment to insert/update the mapping
-                        originSector.Destinations[canonicalDest] = gate;
+                        var dest =  item.destination;
+                        Destinations.AddUnique(dest);
+                        sector.Destinations[dest] = gate;
                     }
                 }
             }
-            //set
-            //{
-            //    FormerExits.AddRangeUnique(Exits);
-            //    //Exits.Clear();
-            //    //Destinations.Clear();
-            //    Exits = new List<Sector>();
-            //    Destinations = new List<Sector>();
-
-            //    foreach (var item in value)
-            //    {
-            //        if (item.origin == null || item.gate == null || item.destination == null) continue;
-            //        var sector = item.origin;
-            //        var gate = item.gate;
-            //        var dest = item.destination;
-            //        Destinations.AddUnique(dest);
-            //        Exits.AddUnique(sector);
-            //        sector.Destinations.TryAdd(dest, gate);
-            //    }
-            //}
         }
 
         public void AutoPositionSectors(bool randomize = false, Random random = null)
