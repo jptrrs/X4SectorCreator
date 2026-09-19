@@ -81,8 +81,9 @@ namespace X4SectorCreator.Objects
 
         internal void SetUpConnections()
         {
-            bordering.Clear();
             connections.Clear();
+            bordering.Clear();
+            neighbors.Clear();
             foreach (var cluster in Clusters)
             {
                 cluster.ExitPoints = ClusterManager.PickDestinationsFromCluster(cluster, c => c != cluster);
@@ -93,31 +94,12 @@ namespace X4SectorCreator.Objects
                     neighbors.Add(exit.destination.AssignedTerritoryId);
                 }
             }
-            if (connections.Count == 0) unconnected = true;
+            if (connections.Count == 0) unconnected = Clusters.All(c => c.PossibleExits.Count == 0);
         }
 
-        internal HashSet<Cluster> ExitClusters //This is persistent once set for the 1st time.
-        {
-            get
-            {
-                if (exitClusters.Count == 0)
-                {
-                    if (Connections != null)
-                    {
-                        exitClusters = Connections?.Select(x => x.cluster).ToHashSet();
-                    }
-                }
-                return exitClusters;
-            }
-        }
+        internal HashSet<Cluster> ExitClusters => Connections?.Select(x => x.cluster).ToHashSet();
 
-        internal HashSet<Gate> ExitGates
-        {
-            get
-            {
-                return Connections?.Select(x => x.gate).ToHashSet();
-            }
-        }
+        internal HashSet<Gate> ExitGates => Connections?.Select(x => x.gate).ToHashSet();
 
         internal int HeightToFit => overhead ? size.Y + 1 : size.Y;
 

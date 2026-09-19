@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
@@ -42,7 +41,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     var absY = Math.Abs(p.Y);
                     return absX < SquareBoundary && absY < SquareBoundary;
                 };
-        private List<Cluster> misplaced = [];
         private Point occupiedMax;
         private HashSet<int> sequentialDomains = [];
         private Dictionary<string, List<int>> staged = [];
@@ -134,33 +132,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         }
 
         #region territories
-        
-        private readonly Func<(Cluster, Cluster), bool> AreConnected = (pair) =>
-        {
-            bool flag = false;
-            var clusterA = pair.Item1;
-            var clusterB = pair.Item2;
-            foreach (var gate in clusterA.FindGates())
-            {
-                gate.FindDestination(out Cluster focused);
-                flag = focused.Equals(clusterB);
-                if (flag) break;
-            }
-            return flag;
-        };
-        private readonly Func<Cluster, HashSet<Cluster>, IEnumerable<Cluster>> GetNeighbors = (location, crowd) =>
-        {
-            var targetPositions = NeighborOffsets
-                .Select(offset => new Point(location.Position.X + offset.x, location.Position.Y + offset.y))
-                .ToHashSet();
-            return crowd.Where(cluster => targetPositions.Contains(cluster.Position));
-        };
-
-        private Func<Cluster, bool> DLCMatch => cluster =>
-        {
-            return cluster.Dlc == territories.Last().Value.dlc;
-        };
-
+       
         private static bool ShouldMergeByPolice(Sector origin, Sector destination)
         {
             //works for Terrans and Avarice
@@ -183,22 +155,44 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 && target.SameOwner;
         }
 
-        private Action<Cluster, bool> SortTerritory => (cluster, reset) =>
-        {
-            if (reset)
-            {
-                var newTerritory = new Territory(cluster, territories.Count);
-                territories.Add(newTerritory.id, newTerritory);
-                cluster.AssignedTerritoryId = newTerritory.id;
-                return;
-            }
-            var territory = territories.Last().Value;
-            territory.Clusters.Add(cluster);
-            cluster.AssignedTerritoryId = territory.id;
-        };
-
         private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
+            Action<Cluster, bool> SortTerritory = (cluster, reset) =>
+            {
+                if (reset)
+                {
+                    var newTerritory = new Territory(cluster, territories.Count);
+                    territories.Add(newTerritory.id, newTerritory);
+                    cluster.AssignedTerritoryId = newTerritory.id;
+                    return;
+                }
+                var territory = territories.Last().Value;
+                territory.Clusters.Add(cluster);
+                cluster.AssignedTerritoryId = territory.id;
+            };
+            
+            Func<Cluster, HashSet<Cluster>, IEnumerable<Cluster>> GetNeighbors = (location, crowd) =>
+            {
+                var targetPositions = NeighborOffsets
+                    .Select(offset => new Point(location.Position.X + offset.x, location.Position.Y + offset.y))
+                    .ToHashSet();
+                return crowd.Where(cluster => targetPositions.Contains(cluster.Position));
+            };
+
+            Func<(Cluster, Cluster), bool> AreConnected = (pair) =>
+            {
+                bool flag = false;
+                var clusterA = pair.Item1;
+                var clusterB = pair.Item2;
+                foreach (var gate in clusterA.FindGates())
+                {
+                    gate.FindDestination(out Cluster focused);
+                    flag = focused.Equals(clusterB);
+                    if (flag) break;
+                }
+                return flag;
+            };
+
             var ordered = clusters.OrderBy(x => x.Position.DistanceSquaredOnHexGrid(Point.Empty)).ToList();
             Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, null, x => AreConnected(x));
         }
@@ -545,7 +539,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Queue<(Point pos, string add)> deferred = [];
             SortedSet<cPoint> occupied = [];
             bool inBounds = true, firstRun = true;
-            List<Cluster> orphanedRoads = [], secondaryRoads = [], unconnected = [];
+            List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
 
             bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
@@ -607,7 +601,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         var zone = gate.ParentZone;
                         zone.Gates.Remove(gate);
                     }
-
                     bool connected = false;
                     if (!firstRun)
                     {
@@ -637,7 +630,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     {
                         orphanedRoads.AddRange(outgoing);
                     }
-                    _ = Toolbox.LogAsync(level, $"loop probe:\n{orphanedRoads.Count} orphaned: {string.Join(", ", orphanedRoads)},\n{secondaryRoads.Count} secondary: {string.Join(", ", secondaryRoads)}.");
 
                 }
                 if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
@@ -698,13 +690,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 _ = Toolbox.LogAsync(level, $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical, totalling {occupied.Count} now.");
 
                 //Update the board.
-                UpdateClusterMap(territory.Clusters);
+                UpdateClusterMap(territory.Clusters, ref misplaced);
 
                 //Redo connections
                 Reconnect(territory);
 
                 //Prepare the next slots.
                 var nextSlots = NextSlotsHelix(territory, occupied, path);
+
                 //bool isSequential = sequentialDomains.Contains(territory.AssignedDomainId);
                 foreach (var (pos, add) in nextSlots)
                 {
@@ -713,23 +706,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 firstRun = false;
             }
-            //FuseNetworks(shouldConnect);
-            foreach (var cluster in orphanedRoads.Where(x => x.PossibleExits.Count == 0))
-            {
-                _ = Toolbox.LogAsync(level, $"{cluster} doesn't have any possible connection point, exluding it from the network. Former exits: {cluster.FormerExits.Count}");
-            }
+            HandleMisplaced(ref misplaced);
             orphanedRoads.RemoveAll(x => x.PossibleExits.Count == 0);
-            SupplementBridges(ref orphanedRoads,secondaryRoads);
-            //foreach (var territory in territories.Values)
-            //{
-            //    territory.SetUpConnections();
-            //}
-
-            if (orphanedRoads.Count > 0)
+            DelayedBridges(ref orphanedRoads,secondaryRoads);
+            foreach (var territory in territories.Values)
             {
-                _ = Toolbox.LogAsync(level, $"Failed to connect: {string.Join(", ", orphanedRoads)}.");
+                territory.SetUpConnections();
             }
-            HandleMisplaced();
+            StitchNetwork(FindNetworks());
         }
 
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
@@ -1026,7 +1010,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return Point.Empty;
         }
 
-        private void HandleMisplaced()
+        private void HandleMisplaced(ref List<Cluster> misplaced)
         {
             if (misplaced.Count == 0) return;
             int y = 1;
@@ -1166,6 +1150,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Starting a new domain - [{string.Join(", ", set.Value)}]. Draw order will be {(newSequence ? "SEQUENTIAL" : "random")}. Loaded to branch {branch}.", true);
             return branch;
         }
+        
         private List<Point> ScanForCollisions(SortedSet<cPoint> occupied, Point position, int width, int height)
         {
             return Toolbox.Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)).ToList();
@@ -1210,7 +1195,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return singleTile ? !occupied.Contains(position) : !SimpleCollision(occupied, position, width, height);
         }
 
-        private void UpdateClusterMap(List<Cluster> clusters)
+        private void UpdateClusterMap(List<Cluster> clusters, ref List<Cluster> misplaced)
         {
             foreach (var c in clusters)
             {
@@ -1225,6 +1210,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         #endregion
 
         #region Reconnections
+
         private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f)
         {
             (Cluster, Cluster) result = (null, null);
@@ -1243,7 +1229,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
-        private bool SupplementBridges(ref List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
+        private bool DelayedBridges(ref List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
         {
             bool result = false;
             if (outgoing.Count == 0 || desired.Count == 0) goto finish;
@@ -1283,6 +1269,71 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
+        private List<List<int>> FindNetworks()
+        {
+            List<List<int>> groups = [];
+
+            Action<Territory, bool> SortGroup = (territory, reset) =>
+            {
+                if (territory.unconnected) return;
+                if (reset)
+                {
+                    groups.Add(new List<int>() { territory.id });
+                    return;
+                }
+                groups.Last().Add(territory.id);
+            };
+
+            Func<Territory, HashSet<Territory>, IEnumerable<Territory>> GetConnected = (subject, crowd) =>
+            {
+                return crowd.Where(x => subject.neighbors.Contains(x.id));
+            };
+
+            Toolbox.FlexFloodProcessor(territories.Values.ToList(), SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
+
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(", ",groups.Select(x => $"\n{x.Count()} total")));
+
+            return groups;
+        }
+
+        private void StitchNetwork(List<List<int>> patches)
+        {
+            var ordered = patches.OrderBy(x => x.Count());
+            Dictionary<int, HashSet<Cluster>> remaining = [];
+            int i = 0;
+            foreach (var group in ordered)
+            {
+                HashSet<Cluster> outgoing = [];
+                foreach (var idx in group)
+                {
+                    var relevant = territories[idx].Clusters.Where(c => c.PossibleExits.Count > 0);
+                    if (relevant.Count() > 0)
+                    {
+                        foreach (var cluster in relevant)
+                        {
+                            outgoing.Add(cluster);
+                        }
+                    }
+                }
+                remaining.Add(i++, outgoing);
+            }
+            while (remaining.Count > 1) //Last one is the bigger, it's all done once we get there.
+            {
+                var entry = remaining.First();
+                var outHash = entry.Value;
+                var destList = remaining.Where(x => x.Key != entry.Key).SelectMany(x => x.Value).ToList();
+                var bridge = FindBridge(outHash, destList, out bool bridged);
+                remaining.Remove(entry.Key);
+                if (bridged)
+                {
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Stitched {bridge.from} with {bridge.to}.");
+                }
+                else
+                {
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Failed stitching!");
+                }
+            }
+        }
 
         #endregion
     }
