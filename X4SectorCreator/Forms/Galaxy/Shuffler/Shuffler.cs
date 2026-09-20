@@ -48,7 +48,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private Dictionary<int, Territory> territories = [];
         private static Dictionary<string, string> policeFactions = [];
 
-        private Dictionary<int, HashSet<Cluster>> gatesNetwork = [];
         private GateBuilderMST GateBuilder = new GateBuilderMST(new ProceduralSettings
         {
             Seed = Localisation.GetFnvHash(Random.Shared.Next().ToString()),
@@ -115,7 +114,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     {
                         policeFactions = FactionsForm.AllCustomFactions.ToDictionary(f => f.Key, f => f.Value.PoliceFaction);
                     }
-                    foreach (var faction in AdditionalFactionMapping.GetDefaultPolice().Where(x => !x.Value.Equals("none", StringComparison.OrdinalIgnoreCase)))
+                    foreach (var faction in AdditionalVanillaMapping.GetDefaultPolice().Where(x => !x.Value.Equals("none", StringComparison.OrdinalIgnoreCase)))
                     {
                         policeFactions[faction.Key] = faction.Value;
                     }
@@ -125,6 +124,32 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         }
 
         #region territories
+
+        private static bool SharedOwner(string owner, string targetOwner)
+        {
+            return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
+        }
+
+        private static bool ArePredeterminedVassals(string owner, string targetOwner)
+        {
+            return AdditionalVanillaMapping.VassalFactions.ContainsKey(owner)
+                && AdditionalVanillaMapping.VassalFactions[owner] == targetOwner;
+        }
+
+        private static bool ArePredeterminedClusterPair(Cluster subject, Cluster target)
+        {
+            var subjectName = subject.Name;
+            var targetName = target.Name;
+            bool flag = (AdditionalVanillaMapping.ObligateClusterPairs.ContainsKey(subjectName)
+                && AdditionalVanillaMapping.ObligateClusterPairs[subjectName] == targetName)
+                || (AdditionalVanillaMapping.ObligateClusterPairs.ContainsValue(subjectName)
+                && AdditionalVanillaMapping.ObligateClusterPairs.ReverseLookup(subjectName).First() == targetName);
+            //if (subjectName.Contains("Heretic",StringComparison.OrdinalIgnoreCase))
+            //{
+            //    _ = Toolbox.LogAsync("TEST", $"flag={flag}, subjectName={subjectName}, targetName={targetName}");
+            //}
+            return flag;
+        }
        
         private static bool ShouldMergeByPolice(Sector origin, Sector destination)
         {
@@ -132,11 +157,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var owner = origin.CurrentOwner.ToLower();
             var targetOwner = destination.CurrentOwner.ToLower();
             return PoliceFactions.ContainsKey(targetOwner) && owner.Equals(PoliceFactions[targetOwner]);
-        }
-
-        private static bool SharedOwner(string owner, string targetOwner)
-        {
-            return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
         }
 
         private static bool ShouldMergeByDLC(Territory selected, Territory target)
@@ -147,6 +167,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 && selected.SameOwner
                 && target.SameOwner;
         }
+
 
         private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
@@ -345,25 +366,28 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private void FindAnnexed()
         {
-            List<(Territory territory, Sector origin, Sector destination)> connections = territories.Values
+            List<(Territory territory, Cluster cluster, Sector origin, Sector destination)> connections = territories.Values
                 .SelectMany(t => t.Connections
-                .Select(c => (t, c.origin, c.destination)))
+                .Select(c => (t, c.cluster, c.origin, c.destination)))
                 .ToList();
             List<int> annexed = [];
-            foreach (var (territory, origin, destination) in connections)
+            foreach (var (territory, cluster, origin, destination) in connections)
             {
                 var targetId = destination.AssignedTerritoryId;
-                if (origin.IsNeutral || destination.IsNeutral || targetId < 1) continue;
+                if (targetId < 1) continue;
+                bool mandatory = ArePredeterminedClusterPair(cluster, destination.Parent);
+                if (!mandatory && (origin.IsNeutral || destination.IsNeutral)) continue;
                 var target = territories[targetId];
                 if (target != null)
                 {
                     var owner = origin.CurrentOwner.ToLower();
                     var targetOwner = destination.CurrentOwner.ToLower();
                     if (owner == null || annexed.Contains(targetId)) continue;
-                    bool toMerge = ShouldMergeByDLC(territory, target)
+                    bool toMerge = mandatory
+                        || (ShouldMergeByDLC(territory, target)
                         && (ShouldMergeByPolice(origin, destination)
-                        || ((target.Landlocked || territory.Landlocked) && SharedOwner(owner, targetOwner)));
-                    bool sameOwner = SharedOwner(owner, targetOwner);
+                        || ((target.Landlocked || territory.Landlocked) && SharedOwner(owner, targetOwner))));
+                    bool sameOwner = SharedOwner(owner, targetOwner) || ArePredeterminedVassals(owner, targetOwner);
                     if (toMerge || sameOwner)
                     {
                         territory.annexedIds.AddUnique(targetId);
@@ -642,7 +666,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 //Redo connections
                 var reachAcross = !firstRun /*&& helixGeneration % periodicConnectionModule == 0*/ && direction == branch;
                 Direction reachDir = reachAcross ? (Direction)(((int)direction + 3) % 4) : Direction.Undefined;
-                Reconnect(territory, reachDir, level, firstRun, orphanedRoads, secondaryRoads);
+                Reconnect(territory, reachDir, firstRun, orphanedRoads, secondaryRoads);
 
                 //Prepare the next slots.
                 var nextSlots = NextSlotsHelix(territory, occupied, path);
@@ -1231,7 +1255,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
             territory.SetUpConnections();
         }
-
 
         private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f, Predicate<(Cluster, Cluster)> filter = null)
         {
