@@ -144,10 +144,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 && AdditionalVanillaMapping.ObligateClusterPairs[subjectName] == targetName)
                 || (AdditionalVanillaMapping.ObligateClusterPairs.ContainsValue(subjectName)
                 && AdditionalVanillaMapping.ObligateClusterPairs.ReverseLookup(subjectName).First() == targetName);
-            //if (subjectName.Contains("Heretic",StringComparison.OrdinalIgnoreCase))
-            //{
-            //    _ = Toolbox.LogAsync("TEST", $"flag={flag}, subjectName={subjectName}, targetName={targetName}");
-            //}
             return flag;
         }
        
@@ -221,31 +217,29 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             // rebuild the dictionary so each entry is a consolidated domain.
             Dictionary<int, List<int>> consolidated = [];
-            int idx = 1;
-            int count = 0;
+            int idx = 0;
             foreach (var g in groupsLeft)
             {
-                count += g.Count;
-                consolidated.Add(idx++, g.OrderBy(x => Random.Shared.Next()).ToList()/*SequencedDomainFromHash(idx, g)*/);
+                idx++;
+                consolidated.Add(idx, /*g.OrderBy(x => Random.Shared.Next()).ToList()*/SequencedDomainFromHash(idx, g));
             }
             domains = DesignatedDomains(consolidated);
 
             // logging
-            count += domains.Count - idx;
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}\n{count} territories in total.");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
         }
 
-        private List<int> SequencedDomainFromHash(int idx, HashSet<int> g)
+        private List<int> SequencedDomainFromHash(int idx, HashSet<int> group)
         {
             List<int> result = [];
-            if (KeepSequence(g.Select(x => territories[x]).ToList()))
+            if (KeepSequence(group.Select(x => territories[x]).ToList()))
             {
-                result = g.OrderBy(x => x).ToList();
+                result = group.OrderBy(x => x).ToList();
                 sequentialDomains.Add(idx); //note that down for later.
             }
             else
             {
-                result = g.OrderBy(x => Random.Shared.Next()).ToList();
+                result = group.OrderBy(x => Random.Shared.Next()).ToList();
             }
             return result;
         }
@@ -274,7 +268,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             List<HashSet<int>> result = [];
             foreach (var g in groups)
             {
-                int remain = -1;
                 if (g.Count > 1 && g.Any(x => territories[x].toMerge))
                 {
                     var extracted = g.Where(x => territories[x].toMerge).ToHashSet();
@@ -296,9 +289,17 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     {
                         // First, fix the now outdated annexedIds registries.
                         extracted.Remove(replacement);
-                        foreach (var ids in leftovers.Select(x => territories[x].annexedIds))
+                        foreach (var id in leftovers)
                         {
-                            ids.RemoveAll(extracted.Contains);
+                            var territory = territories[id];
+                            // On territories that were connected (not all of them), replace merged ids with the remaining one. 
+                            if (extracted.Intersect(territory.annexedIds).Any())
+                            {
+                                territory.annexedIds.RemoveAll(extracted.Contains);
+                                territory.annexedIds.Add(replacement);
+                                // Also add back its id to the newly merged. 
+                                territories[replacement].annexedIds.AddUnique(territory.id);
+                            }
                         }
                         // Bring back the merged territory
                         if (replacement > 0) leftovers.Add(replacement);
@@ -452,7 +453,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 && (set.Any(x => x.isBridge) // unmerged close colonies
                 || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.dlc)))); // annexed + DLC
         }
-        
+
         private void TerritoriesReport()
         {
             var log = new StringBuilder();
@@ -557,7 +558,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             bool inBounds = true, firstRun = true;
             List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
             List<ImmutableList<int>> domainsList = domains.Values.Where(x => x.Count > 1).Select(x => x.ToImmutableList()).ToList();
-            
+
 
             bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
