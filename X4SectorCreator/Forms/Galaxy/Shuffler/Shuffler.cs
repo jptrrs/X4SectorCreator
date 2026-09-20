@@ -22,14 +22,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             (-1,-1),
         ];
         private static (int cols, int rows) hexGridFrame;
-        private static int squareBoundary = -1;
-        private static float gateMaxDist = 30f;
+        private static int squareBoundary = -1, IntraDomainsDistFactor = 4;
+        private static float gateMaxDist = 40f; // when reaching for connections within domains, it will be multiplied by IntraDomainsDistFactor.
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
         {
             return !territory.Clusters.Contains(cluster);
         };
         private Dictionary<int, List<int>> domains = [];
-        private int helixGeneration = 1;
+        private int helixGeneration = 1, periodicConnectionModule = 4;
         private Func<Point, bool> InBounds = p =>
                 {
                     var absX = Math.Abs(p.X);
@@ -528,15 +528,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            Queue<(Point pos, string path)> slots = new ([(Point.Empty, "")]);
-            Queue<(Point pos, string add)> deferred = [];
+            Queue<(Point pos, string path)> slots = new([(Point.Empty, "")]), deferred = [];
             SortedSet<cPoint> occupied = [];
             bool inBounds = true, firstRun = true;
             List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
             List<ImmutableList<int>> domainsList = domains.Values.Where(x => x.Count > 1).Select(x => x.ToImmutableList()).ToList();
-
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"TEST: Consolidated {domainsList.Count} domain(s): {string.Join("; ", domainsList.Select(x => $"[{string.Join(',', x)}]"))}.");
-
+            
 
             bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
@@ -615,7 +612,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                             bridge = FindBridge(outgoing, secondaryRoads, out connected, gateMaxDist);
                         }
                         //update lists in all cases
-                        if (connected) 
+                        if (connected)
                         {
                             outgoing.Remove(bridge.from);
                             secondaryRoads.Add(bridge.from);
@@ -627,7 +624,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     {
                         orphanedRoads.AddRange(outgoing);
                     }
-
                 }
                 if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
                 territory.SetUpConnections();
@@ -691,6 +687,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
                 //Redo connections
                 Reconnect(territory);
+                if (!firstRun && helixGeneration % periodicConnectionModule == 0 && direction == branch)
+                {
+                    InterBranchLink(territory);
+                }
 
                 //Prepare the next slots.
                 var nextSlots = NextSlotsHelix(territory, occupied, path);
@@ -705,16 +705,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             HandleMisplaced(ref misplaced);
             orphanedRoads.RemoveAll(x => x.PossibleExits.Count == 0);
-            DelayedBridges(ref orphanedRoads,secondaryRoads);
-            foreach (var territory in territories.Values)
-            {
-                territory.SetUpConnections();
-            }
-            StitchNetwork(FindNetworks(territories.Values.ToList()));
-            foreach (var set in domainsList)
-            {
-                StitchNetwork(FindNetworks(set.Select(x => territories[x]).ToList()));
-            }
+            var delayed = DelayedBridges(orphanedRoads, secondaryRoads);
+            _ = Toolbox.LogAsync(level, (delayed > 0 ?
+                $"{delayed} more gate connections were made for territories that ended up isolated." : "No isolated territories after shuffling.")
+                + " The network will now be stitched together...",true);
+            FinalizeNetwork(domainsList);
         }
 
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
@@ -1229,9 +1224,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
-        private bool DelayedBridges(ref List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
+        private int DelayedBridges(List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
         {
-            bool result = false;
+            var result = 0;
             if (outgoing.Count == 0 || desired.Count == 0) goto finish;
 
             Dictionary<(Cluster from, Cluster to), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit);
@@ -1253,20 +1248,29 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 while (subset.Count > 0 && territories[origin.AssignedTerritoryId].neighbors.Contains(destination.AssignedTerritoryId));
                 if (destination == null) continue;
                 GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
+                result++;
                 edges.Remove(route);
-                var taken = edges.Keys.Where(k => k.from == route.from).ToList();
+                var taken = edges.Keys.Where(k => k.from == route.from || k.to == route.to).ToList(); //just one bridge to/from there per execution.
                 foreach (var key in taken)
                 {
                     edges.Remove(key);
                 }
-                desired.Remove(destination); //just one bridge there per execution.
-                plugged.Add(origin);
             }
-            outgoing = outgoing.Except(plugged).ToList();
-            result = true;
-
             finish:
             return result;
+        }
+
+        private void FinalizeNetwork(List<ImmutableList<int>> domainsList)
+        {
+            foreach (var territory in territories.Values)
+            {
+                territory.SetUpConnections();
+            }
+            StitchNetwork(FindNetworks(territories.Values.ToList()));
+            foreach (var set in domainsList)
+            {
+                StitchNetwork(FindNetworks(set.Select(x => territories[x]).ToList()), gateMaxDist * IntraDomainsDistFactor);
+            }
         }
 
         private List<List<int>> FindNetworks(List<Territory> territories)
@@ -1293,12 +1297,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             //logging
             int count = groups.Count;
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count>1 ? $"{count} groups" : "only one group")} out of {territories.Count} territories.");
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count>1 ? $"{count} groups" : "only one group")} out of {territories.Count} territories.", true);
 
             return groups;
         }   
 
-        private void StitchNetwork(List<List<int>> patches)
+        private void StitchNetwork(List<List<int>> patches, float limit = -1f)
         {
             var ordered = patches.OrderBy(x => x.Count());
             Dictionary<int, HashSet<Cluster>> remaining = [];
@@ -1324,7 +1328,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var entry = remaining.First();
                 var outHash = entry.Value;
                 var destList = remaining.Where(x => x.Key != entry.Key).SelectMany(x => x.Value).ToList();
-                var bridge = FindBridge(outHash, destList, out bool bridged, gateMaxDist * 3);
+                var bridge = FindBridge(outHash, destList, out bool bridged, limit);
                 remaining.Remove(entry.Key);
                 if (bridged)
                 {
@@ -1332,7 +1336,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Failed stitching!");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ",outHash)}" : "ERROR: Failed stitching!");
                 }
             }
         }
