@@ -111,7 +111,7 @@ namespace X4SectorCreator.Helpers
             return new Point((int)Math.Round(rx, MidpointRounding.AwayFromZero), (int)Math.Round(ry, MidpointRounding.AwayFromZero));
         }
 
-        public static Dictionary<(Cluster, Cluster), float> BridgedParwiseDistances(List<Cluster> outgoing, List<Cluster> desired, float limit)
+        public static Dictionary<(Cluster, Cluster), float> BridgedParwiseDistances(List<Cluster> outgoing, List<Cluster> desired, float limit, Predicate<(Cluster,Cluster)> filter = null)
         {
             List<Cluster> rejectedonce = [], paired = [];
             Dictionary<(Cluster, Cluster), float> results = [];
@@ -121,7 +121,7 @@ namespace X4SectorCreator.Helpers
                 for (int j = 0; j < desired.Count; j++)
                 {
                     Cluster destination = desired[j];
-                    if (!origin.SameTerritoryAs(destination))
+                    if (!origin.SameTerritoryAs(destination) && (filter == null || filter((origin,destination))))
                     {
                         float dist = origin.Position.DistanceSquared(destination.Position);
                         if (limit < 0 || dist < limit) results.TryAdd((origin, destination), dist);
@@ -130,5 +130,6 @@ namespace X4SectorCreator.Helpers
             }
             return results;
         }
+
     }
 }

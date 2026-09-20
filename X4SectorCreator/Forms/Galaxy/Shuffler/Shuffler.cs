@@ -22,7 +22,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             (-1,-1),
         ];
         private static (int cols, int rows) hexGridFrame;
-        private static int squareBoundary = -1, IntraDomainsDistFactor = 4;
+        private static int squareBoundary = -1, IntraDomainsDistFactor = 3;
         private static float gateMaxDist = 40f; // when reaching for connections within domains, it will be multiplied by IntraDomainsDistFactor.
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
         {
@@ -583,52 +583,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 return flag;
             }
 
-            void Reconnect(Territory territory)
-            {
-                HashSet<Cluster> outgoing = [];
-                if (territory.ExitGates != null && !territory.isBridge)
-                {
-                    foreach (var link in territory.Connections)
-                    {
-                        outgoing.Add(link.cluster);
-                        var gate = link.gate;
-                        var zone = gate.ParentZone;
-                        zone.Gates.Remove(gate);
-                    }
-                    bool connected = false;
-                    if (!firstRun)
-                    {
-                        //First, try known & close paths
-                        var bridge = FindBridge(outgoing, orphanedRoads, out connected, gateMaxDist);
-                        if (connected)
-                        {
-                            //Take destination out of queue and into secondary.
-                            orphanedRoads.Remove(bridge.to);
-                            secondaryRoads.Add(bridge.to);
-                        }
-                        else
-                        {
-                            //Then, attempt undesirable but close paths
-                            bridge = FindBridge(outgoing, secondaryRoads, out connected, gateMaxDist);
-                        }
-                        //update lists in all cases
-                        if (connected)
-                        {
-                            outgoing.Remove(bridge.from);
-                            secondaryRoads.Add(bridge.from);
-                            secondaryRoads.AddRange(outgoing);
-                        }
-                        _ = Toolbox.LogAsync(level, $"Attempt to reconnect {territory.seed.Name}: {(connected ? $"SUCESS! Connected to {bridge.to}" : $"FAILED! Outgoing clusters: {outgoing.Count()}")}.");
-                    }
-                    if (!connected)
-                    {
-                        orphanedRoads.AddRange(outgoing);
-                    }
-                }
-                if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
-                territory.SetUpConnections();
-            }
-
             for (int i = 0; i < cards.Count; i++)
             {
                 bool valid = TryGetTerritory(out var territory, out var isSequence, out var position, out var direction, out var branch, out var path);
@@ -683,14 +637,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 _ = Toolbox.LogAsync(level, $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical, totalling {occupied.Count} now.");
 
                 //Update the board.
-                UpdateClusterMap(territory.Clusters, ref misplaced);
+                UpdateClusterMap(territory.Clusters, misplaced);
 
                 //Redo connections
-                Reconnect(territory);
-                if (!firstRun && helixGeneration % periodicConnectionModule == 0 && direction == branch)
-                {
-                    InterBranchLink(territory);
-                }
+                var reachAcross = !firstRun /*&& helixGeneration % periodicConnectionModule == 0*/ && direction == branch;
+                Direction reachDir = reachAcross ? (Direction)(((int)direction + 3) % 4) : Direction.Undefined;
+                Reconnect(territory, reachDir, level, firstRun, orphanedRoads, secondaryRoads);
 
                 //Prepare the next slots.
                 var nextSlots = NextSlotsHelix(territory, occupied, path);
@@ -703,7 +655,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 firstRun = false;
             }
-            HandleMisplaced(ref misplaced);
+            HandleMisplaced(misplaced);
             orphanedRoads.RemoveAll(x => x.PossibleExits.Count == 0);
             var delayed = DelayedBridges(orphanedRoads, secondaryRoads);
             _ = Toolbox.LogAsync(level, (delayed > 0 ?
@@ -711,7 +663,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 + " The network will now be stitched together...",true);
             FinalizeNetwork(domainsList);
         }
-
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
         {
             Point result = Point.Empty;
@@ -1006,7 +957,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return Point.Empty;
         }
 
-        private void HandleMisplaced(ref List<Cluster> misplaced)
+        private void HandleMisplaced(List<Cluster> misplaced)
         {
             if (misplaced.Count == 0) return;
             int y = 1;
@@ -1191,7 +1142,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return singleTile ? !occupied.Contains(position) : !SimpleCollision(occupied, position, width, height);
         }
 
-        private void UpdateClusterMap(List<Cluster> clusters, ref List<Cluster> misplaced)
+        private void UpdateClusterMap(List<Cluster> clusters, List<Cluster> misplaced)
         {
             foreach (var c in clusters)
             {
@@ -1206,14 +1157,89 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         #endregion
 
         #region Reconnections
+        private void Reconnect(Territory territory, Direction alsoReachFor, bool firstRun, List<Cluster> orphanedRoads, List<Cluster> secondaryRoads)
+        {
+            HashSet<Cluster> outgoing = [];
+            if (territory.ExitGates != null && !territory.isBridge)
+            {
+                foreach (var link in territory.Connections)
+                {
+                    outgoing.Add(link.cluster);
+                    var gate = link.gate;
+                    var zone = gate.ParentZone;
+                    zone.Gates.Remove(gate);
+                }
 
-        private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f)
+                bool FindBridgeManagePools(HashSet<Cluster> originCandidates, List<Cluster> destinationsPool, bool removeDestination, out (Cluster from, Cluster to) bridge, Predicate<(Cluster, Cluster)> filter = null)
+                {
+                    bool result = false;
+                    bridge = FindBridge(originCandidates, destinationsPool, out result, gateMaxDist, filter);
+                    if (result && bridge.from != null && bridge.to != null)
+                    {
+                        if (removeDestination)
+                        {
+                            destinationsPool.Remove(bridge.to);
+                            secondaryRoads.Add(bridge.to);
+                        }
+                        if (outgoing.Contains(bridge.from))
+                        {
+                            outgoing.Remove(bridge.from);
+                            secondaryRoads.Add(bridge.from);
+                        }
+                    }
+                    return result;
+                }
+
+                bool connected = false, reachedAcross = false;
+                int territoryConnected = -1;
+                if (!firstRun)
+                {
+                    // First, try known & close paths -> orphanedRoads (preferable)
+                    connected = FindBridgeManagePools(outgoing, orphanedRoads, true, out var bridge);
+                    if (!connected)
+                    {
+                        // Then, attempt undesirable but close paths -> secondaryRoads
+                        connected = FindBridgeManagePools(outgoing, secondaryRoads, false, out bridge);
+                    }
+                    if (connected) territoryConnected = bridge.to.AssignedTerritoryId;
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reconnect {territory.seed.Name}: {(connected ? $"SUCESS! Connected to {bridge.to}" : $"FAILED! Outgoing clusters: {outgoing.Count()}")}.");
+                }
+
+                if (outgoing.Count > 0 && alsoReachFor != Direction.Undefined)
+                {
+                    var outgoingSub = outgoing.Where(x => x.Direction != (int)alsoReachFor.OppositeDir()).ToHashSet();
+                    if (outgoingSub.Count > 0)
+                    {
+                        // Try orphanedRoads first with direction constraint
+                        reachedAcross = FindBridgeManagePools(outgoingSub, orphanedRoads, true, out var bridgeAcross, pair => CanConnectFromDirection(pair, alsoReachFor));
+                        if (!reachedAcross)
+                        {
+                            // Fallback to secondaryRoads
+                            var secondarySub = connected ? secondaryRoads.Where(x => x.AssignedTerritoryId != territoryConnected).ToList() : secondaryRoads;
+                            if (secondarySub.Count > 0)
+                            {
+                                reachedAcross = FindBridgeManagePools(outgoingSub, secondarySub, false, out bridgeAcross, pair => CanConnectFromDirection(pair, alsoReachFor));
+                            }
+                        }
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reach {alsoReachFor} from {territory.seed.Name}: {(reachedAcross ? $"SUCESS! Connected to {bridgeAcross.to}" : $"FAILED! Outgoing clusters: {outgoingSub.Count()}")}.");
+                    }
+                }
+
+                if (connected || reachedAcross) secondaryRoads.AddRange(outgoing);
+                else orphanedRoads.AddRange(outgoing);
+            }
+            if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
+            territory.SetUpConnections();
+        }
+
+
+        private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f, Predicate<(Cluster, Cluster)> filter = null)
         {
             (Cluster, Cluster) result = (null, null);
             var outgoing = outgoingHash.Where(x => x.PossibleExits.Count > 0).ToList();
             desired = desired.Where(x => x.PossibleExits.Count > 0).ToList();
             if (outgoing.Count == 0 || desired.Count == 0) goto finish;
-            Dictionary<(Cluster, Cluster), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit);
+            Dictionary<(Cluster, Cluster), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit, filter);
             if (edges.Count == 0) goto finish;
             var ((origin, destination), _) = edges.MinBy(x => x.Value);
             GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
@@ -1339,6 +1365,21 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ",outHash)}" : "ERROR: Failed stitching!");
                 }
             }
+        }
+
+        public bool CanConnectFromDirection((Cluster from, Cluster to) pair, Direction direction)
+        {
+            var origin = pair.from;
+            var target = pair.to;
+            return direction switch
+            {
+                Direction.Undefined => false,
+                Direction.Right => target.Position.X > origin.Position.X,
+                Direction.Down => target.Position.Y < origin.Position.Y,
+                Direction.Left => target.Position.X < origin.Position.X,
+                Direction.Up => target.Position.Y > origin.Position.Y,
+                _ => false
+            };
         }
 
         #endregion
