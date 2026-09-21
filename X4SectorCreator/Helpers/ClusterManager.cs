@@ -27,8 +27,8 @@ namespace X4SectorCreator.Helpers
                     if (zone.Gates?.Count == 0) continue;
                     foreach (Gate gate in zone.Gates)
                     {
-                        Sector destSector = gate.FindDestination(out Cluster destCluster);
-                        if (filter != null && !filter(destCluster)) continue;
+                        Sector destSector = gate.DestinationSector;
+                        if (destSector != null && filter != null && !filter(destSector.Parent)) continue;
                         result.Add((sector, gate, destSector));
                     }
                 }

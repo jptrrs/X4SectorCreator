@@ -22,7 +22,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             (-1,-1),
         ];
         private static (int cols, int rows) hexGridFrame;
-        private static int squareBoundary = -1, IntraDomainsDistFactor = 3;
+        private static int maxSlotAdjust = 7, squareBoundary = -1, IntraDomainsDistFactor = 3;
         private static float gateMaxDist = 40f; // when reaching for connections within domains, it will be multiplied by IntraDomainsDistFactor.
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
         {
@@ -196,8 +196,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var clusterB = pair.Item2;
                 foreach (var gate in clusterA.FindGates())
                 {
-                    gate.FindDestination(out Cluster focused);
-                    flag = focused.Equals(clusterB);
+                    flag = gate.DestinationSector.Parent.Equals(clusterB);
                     if (flag) break;
                 }
                 return flag;
@@ -462,7 +461,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 string ownerName = t.SameOwner ? t.seed.Sectors[0].CurrentOwner : "Divided";
                 var owner = t.IsNeutral ? "Neutral" : ownerName;
-                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}{(string.IsNullOrEmpty(t.dlc) ? "" : $", dlc: {t.dlc}")}{(PoliceFactions.ContainsKey(owner.ToLower()) ? $", police: {PoliceFactions[owner.ToLower()]}" : "")}.");
+                log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}{(string.IsNullOrEmpty(t.dlc) ? "" : $", dlc: {t.dlc}")}{(PoliceFactions.ContainsKey(owner.ToLower()) ? $", police: {PoliceFactions[owner.ToLower()]}" : "")}");
                 if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 if (t.isBridge) log.Append($"; bridges {string.Join(", ", t.Clusters.First(x => x.BridgeFor.Count > 0).BridgeFor.Select(y => $"#{territories[y].id}-{territories[y].seed.Name}"))}");
                 if (t.closeColonyIds.Count > 0) log.Append($"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
@@ -738,6 +737,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return position;
         }
 
+        private static Point MoveIntoResultingDirection(Direction directionA, Direction directionB, Point position, int distance)
+        {
+            if (directionA.OppositeDir() == directionB) return position;
+            var componentA = MoveIntoDirection(directionA, Point.Empty, distance);
+            var componentB = MoveIntoDirection(directionB, Point.Empty, distance);
+            return position.Add(componentA).Add(componentB);
+        }
+
         private Point AdjustForInsertion(Territory territory, Point displacement, Direction branch, Direction dir, SortedSet<cPoint> occupied, bool isSequence)
         {
             var selected = territory.Anchor.Add(displacement);
@@ -755,9 +762,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Point drift = Point.Empty;
 
             //1. Flush out the slot if covered.
-            var driftDirection = GetDriftDirection(selected);
+            var outDir = GetOutwardDirection(selected);
+            var driftDir = GetDriftDirection(selected);
             var flush = Point.Empty;
-            if (occupied.Contains(selected) && TryToPushAround(selected, dir, driftDirection, occupied, 0, 0, 10, ref flush))
+            if (occupied.Contains(selected) && TryToPushAround(selected, outDir, driftDir, occupied, 0, 0, maxSlotAdjust, ref flush))
             {
                 flushed = true;
                 selected = selected.Add(flush);
@@ -931,27 +939,49 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             vector = GetDriftVector(pos, GetDriftDirection(pos), moveX, moveY);
             return !vector.IsEmpty;
         }
-
-        private Direction GetDriftDirection(Point pos)
+        private Direction GetOutwardDirection(Point pos)
         {
             //Direction is based on position, 45 degrees quadrants.
-            if (InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X || pos.X < SquareBoundary && pos.Y > SquareBoundary) //Above: move right then down
-            {
-                return Direction.Right;
-            }
-            else if (InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X || pos.X > -SquareBoundary && pos.Y < -SquareBoundary) //Below: move left then up
-            {
-                return Direction.Left;
-            }
-            else if (InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y || pos.X > SquareBoundary && pos.Y > -SquareBoundary) //Right: move down then left
-            {
-                return Direction.Down;
-            }
-            else if (InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y || pos.X < -SquareBoundary && pos.Y < SquareBoundary) //Left: move up then right
+            if (InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X || pos.X < SquareBoundary && pos.Y > SquareBoundary)
             {
                 return Direction.Up;
             }
+            else if (InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X || pos.X > -SquareBoundary && pos.Y < -SquareBoundary)
+            {
+                return Direction.Down;
+            }
+            else if (InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y || pos.X > SquareBoundary && pos.Y > -SquareBoundary)
+            {
+                return Direction.Right;
+            }
+            else if (InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y || pos.X < -SquareBoundary && pos.Y < SquareBoundary)
+            {
+                return Direction.Left;
+            }
             return Direction.Undefined;
+        }
+
+        private Direction GetDriftDirection(Point pos)
+        {
+            return (Direction)(((int)GetOutwardDirection(pos) + 1) % 4);
+            ////Direction is based on position, 45 degrees quadrants.
+            //if (InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X || pos.X < SquareBoundary && pos.Y > SquareBoundary) //Above: move right then down
+            //{
+            //    return Direction.Right;
+            //}
+            //else if (InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X || pos.X > -SquareBoundary && pos.Y < -SquareBoundary) //Below: move left then up
+            //{
+            //    return Direction.Left;
+            //}
+            //else if (InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y || pos.X > SquareBoundary && pos.Y > -SquareBoundary) //Right: move down then left
+            //{
+            //    return Direction.Down;
+            //}
+            //else if (InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y || pos.X < -SquareBoundary && pos.Y < SquareBoundary) //Left: move up then right
+            //{
+            //    return Direction.Up;
+            //}
+            //return Direction.Undefined;
         }
 
         private Point GetDriftVector(Point position, Direction dir, int moveX, int moveY)
@@ -1138,28 +1168,29 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             if (primaryDir == Direction.Undefined) return false;
             bool singleTile = width <= 1 && height <= 2;
-            for (int i = 1; i < maxPush; i++)
-            {
-                // Try primary direction
-                Point forced1 = MoveIntoDirection(primaryDir, position, i);
-                if (IsValidPlacement(forced1, singleTile, occupied, width, height))
-                {
-                    vector = forced1.Subtract(position);
-                    return true;
-                }
 
-                // Try secondary direction if available
-                if (secondaryDir != Direction.Undefined)
+            bool valid = false;
+            Point tPos = Point.Empty;
+            Direction tDir = primaryDir;
+            int i = 0, dist = 0;
+            while (dist < maxPush && !valid)
+            {
+                int mi = i % 3;
+                if (mi == 0) dist++;
+                if (mi == 1)
                 {
-                    Point forced2 = MoveIntoDirection(secondaryDir, position, i);
-                    if (IsValidPlacement(forced2, singleTile, occupied, width, height))
-                    {
-                        vector = forced2.Subtract(position);
-                        return true;
-                    }
+                    tPos = MoveIntoResultingDirection(primaryDir, secondaryDir, position, dist);
                 }
+                else
+                {
+                    tDir = mi == 0 ? primaryDir : secondaryDir;
+                    tPos = MoveIntoDirection(tDir, position, dist);
+                }
+                valid = IsValidPlacement(tPos, singleTile, occupied, width, height);
+                i++;
             }
-            return false;
+            vector = tPos.Subtract(position);
+            return valid;
         }
 
         private bool IsValidPlacement(Point position, bool singleTile, SortedSet<cPoint> occupied, int width, int height)

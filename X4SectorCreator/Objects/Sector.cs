@@ -195,6 +195,7 @@ namespace X4SectorCreator.Objects
                 Name = Name,
                 Offset = Offset,
                 Owner = Owner,
+                parent = parent,
                 Placement = Placement,
                 Security = Security,
                 Sunlight = Sunlight,
