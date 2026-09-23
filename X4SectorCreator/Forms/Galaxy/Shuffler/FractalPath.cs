@@ -49,6 +49,22 @@
             return (Direction)firstDigit;
         }
 
+        //unproven. Slot to the left, if branch 1/right. Should work across branches!
+        public static string GetParalelOlderAddress(this string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            if (path.Length == 1) return "0";
+            return path.Substring(1);
+        }
+
+        //unproven. Slot to the right, if branch 1/right.   
+        public static string GetParalelNewerAddress(this string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            if (path.Length == 1 && (path[0] - '0') == 0) return "0";
+            return path[0] + path;
+        }
+
         public static Direction OppositeDir(this Direction given)
         {
             if (given == Direction.Undefined) return given;

@@ -130,7 +130,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
         }
 
-        private static bool ArePredeterminedVassals(string owner, string targetOwner)
+        private static bool ArePredeterminedNeighbors(string owner, string targetOwner)
+        {
+            return AdditionalVanillaMapping.ObligateNeighborFactions.ContainsKey(owner)
+                && AdditionalVanillaMapping.ObligateNeighborFactions[owner] == targetOwner;
+        }
+
+        private static bool IsVassal(string owner, string targetOwner)
         {
             return AdditionalVanillaMapping.VassalFactions.ContainsKey(owner)
                 && AdditionalVanillaMapping.VassalFactions[owner] == targetOwner;
@@ -370,7 +376,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 .SelectMany(t => t.Connections
                 .Select(c => (t, c.cluster, c.origin, c.destination)))
                 .ToList();
-            List<int> annexed = [];
+            //List<int> annexed = [];
             foreach (var (territory, cluster, origin, destination) in connections)
             {
                 var targetId = destination.AssignedTerritoryId;
@@ -382,16 +388,18 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     var owner = origin.CurrentOwner.ToLower();
                     var targetOwner = destination.CurrentOwner.ToLower();
-                    if (owner == null || annexed.Contains(targetId)) continue;
+                    if (owner == null/* || annexed.Contains(targetId)*/) continue;
                     bool toMerge = mandatory
                         || (ShouldMergeByDLC(territory, target)
                         && (ShouldMergeByPolice(origin, destination)
                         || ((target.Landlocked || territory.Landlocked) && SharedOwner(owner, targetOwner))));
-                    bool sameOwner = SharedOwner(owner, targetOwner) || ArePredeterminedVassals(owner, targetOwner);
+                    bool sameOwner = SharedOwner(owner, targetOwner)
+                        || ArePredeterminedNeighbors(owner, targetOwner)
+                        || IsVassal(owner, targetOwner);
                     if (toMerge || sameOwner)
                     {
                         territory.annexedIds.AddUnique(targetId);
-                        annexed.Add(targetId);
+                        //annexed.Add(targetId);
                         target.annexedIds.AddUnique(territory.id);
                         var key = domains.Count + 1;
                         domains.Add(key, [territory.id, targetId]);

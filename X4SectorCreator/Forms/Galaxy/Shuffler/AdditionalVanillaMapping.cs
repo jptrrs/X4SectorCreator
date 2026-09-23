@@ -6,13 +6,20 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
     internal static class AdditionalVanillaMapping
     {
         internal static Dictionary<string, string> VassalFactions = new(StringComparer.OrdinalIgnoreCase)
-        { 
-            { "terran", "pioneers" } 
+        {
+            { "hatikvah", "argon" },
+            { "pioneers", "terran" }
+        };
+
+        internal static Dictionary<string, string> ObligateNeighborFactions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            { "holyorder", "paranid" }
         };
 
         internal static Dictionary<string, string> ObligateClusterPairs = new(StringComparer.OrdinalIgnoreCase)
         {
-            { "Heretic's End", "Watchful Gaze" }
+            { "Heretic's End", "Watchful Gaze" },
+            { "Getsu Fune", "Asteroid Belt" }
         };
 
         private static Dictionary<string, string> vanillaPoliceCached;

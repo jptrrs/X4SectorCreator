@@ -1,5 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 using X4SectorCreator.Forms;
+using X4SectorCreator.Forms.Galaxy.Shuffler;
 using X4SectorCreator.Helpers;
 
 namespace X4SectorCreator.Objects
@@ -178,7 +179,13 @@ namespace X4SectorCreator.Objects
             var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var sector in Sectors)
             {
-                ownerships.Add(sector.CurrentOwner);
+                string owner = sector.CurrentOwner;
+                if (string.IsNullOrEmpty(owner)) continue;
+                if (AdditionalVanillaMapping.VassalFactions.ContainsKey(owner))
+                {
+                    owner = AdditionalVanillaMapping.VassalFactions[owner];
+                }
+                ownerships.Add(owner);
             }
             return ownerships != null && ownerships.Count == 1 ? ownerships.First() : "";
         }
