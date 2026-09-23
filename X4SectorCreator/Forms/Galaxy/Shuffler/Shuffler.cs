@@ -12,6 +12,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
     internal class Shuffler
     {
         private const int gap = 1;
+
         private static readonly (int x, int y)[] NeighborOffsets =
         [
             (0,  2),
@@ -21,33 +22,20 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             (-1, 1),
             (-1,-1),
         ];
+
+        private static float gateMaxDist = 40f;
         private static (int cols, int rows) hexGridFrame;
         private static int maxSlotAdjust = 7, squareBoundary = -1, IntraDomainsDistFactor = 3;
-        private static float gateMaxDist = 40f; // when reaching for connections within domains, it will be multiplied by IntraDomainsDistFactor.
-        private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
-        {
-            return !territory.Clusters.Contains(cluster);
-        };
-        private Dictionary<int, List<int>> domains = [];
-        private int helixGeneration = 1, periodicConnectionModule = 4;
-        private Func<Point, bool> InBounds = p =>
-                {
-                    var absX = Math.Abs(p.X);
-                    var absY = Math.Abs(p.Y);
-                    return absX <= GridFrameBounds.maxX && absY <= GridFrameBounds.maxY;
-                };
-        private Func<Point, bool> InsideSquare = p =>
-                {
-                    var absX = Math.Abs(p.X);
-                    var absY = Math.Abs(p.Y);
-                    return absX < SquareBoundary && absY < SquareBoundary;
-                };
-        private Point occupiedMax;
-        private HashSet<int> sequentialDomains = [];
-        private Dictionary<string, List<int>> staged = [];
-        private Dictionary<int, Territory> territories = [];
+        // when reaching for connections within domains, it will be multiplied by IntraDomainsDistFactor.
+
         private static Dictionary<string, string> policeFactions = [], sequencesInParalelBranches = [];
 
+        private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
+                {
+            return !territory.Clusters.Contains(cluster);
+        };
+
+        private Dictionary<int, List<int>> domains = [];
         private GateBuilderMST GateBuilder = new GateBuilderMST(new ProceduralSettings
         {
             Seed = Localisation.GetFnvHash(Random.Shared.Next().ToString()),
@@ -56,6 +44,26 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             GateMultiChancePerSector = 0
         });
 
+        private int helixGeneration = 1, periodicConnectionModule = 4;
+
+        private Func<Point, bool> InBounds = p =>
+                {
+                    var absX = Math.Abs(p.X);
+                    var absY = Math.Abs(p.Y);
+                    return absX <= GridFrameBounds.maxX && absY <= GridFrameBounds.maxY;
+                };
+
+        private Func<Point, bool> InsideSquare = p =>
+                {
+                    var absX = Math.Abs(p.X);
+                    var absY = Math.Abs(p.Y);
+                    return absX < SquareBoundary && absY < SquareBoundary;
+                };
+
+        private Point occupiedMax;
+        private HashSet<int> sequentialDomains = [];
+        private Dictionary<string, List<int>> staged = [];
+        private Dictionary<int, Territory> territories = [];
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
             // Gather some basic info
@@ -86,22 +94,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Update Map as needed.
             if (MainForm.Instance.SectorMap.IsInitialized) MainForm.Instance.SectorMap.Value.Reset();
         }
-        
+
         internal static int VertGap => gap * 2;
 
         private static (int maxX, int maxY) GridFrameBounds => (hexGridFrame.cols / 2, hexGridFrame.rows / 2);
-
-        private static int SquareBoundary
-        {
-            get
-            {
-                if (squareBoundary < 0)
-                {
-                    squareBoundary = Math.Min(GridFrameBounds.maxX, GridFrameBounds.maxY);
-                }
-                return squareBoundary;
-            }
-        }
 
         private static Dictionary<string, string> PoliceFactions
         {
@@ -122,11 +118,28 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
+        private static int SquareBoundary
+        {
+            get
+            {
+                if (squareBoundary < 0)
+                {
+                    squareBoundary = Math.Min(GridFrameBounds.maxX, GridFrameBounds.maxY);
+                }
+                return squareBoundary;
+            }
+        }
         #region territories
 
-        private static bool SharedOwner(string owner, string targetOwner)
+        private static bool ArePredeterminedClusterPair(Cluster subject, Cluster target)
         {
-            return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
+            var subjectName = subject.Name;
+            var targetName = target.Name;
+            bool flag = (AdditionalVanillaMapping.ObligateClusterPairs.ContainsKey(subjectName)
+                && AdditionalVanillaMapping.ObligateClusterPairs[subjectName] == targetName)
+                || (AdditionalVanillaMapping.ObligateClusterPairs.ContainsValue(subjectName)
+                && AdditionalVanillaMapping.ObligateClusterPairs.ReverseLookup(subjectName).First() == targetName);
+            return flag;
         }
 
         private static bool ArePredeterminedNeighbors(string owner, string targetOwner)
@@ -141,17 +154,27 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 && AdditionalVanillaMapping.VassalFactions[owner] == targetOwner;
         }
 
-        private static bool ArePredeterminedClusterPair(Cluster subject, Cluster target)
+        private static bool KeepSequence(List<Territory> set)
         {
-            var subjectName = subject.Name;
-            var targetName = target.Name;
-            bool flag = (AdditionalVanillaMapping.ObligateClusterPairs.ContainsKey(subjectName)
-                && AdditionalVanillaMapping.ObligateClusterPairs[subjectName] == targetName)
-                || (AdditionalVanillaMapping.ObligateClusterPairs.ContainsValue(subjectName)
-                && AdditionalVanillaMapping.ObligateClusterPairs.ReverseLookup(subjectName).First() == targetName);
-            return flag;
+            //Spares certain domain sets from spawning in randomized order
+            return set.Count > 1
+                && (set.Any(x => x.isBridge) // unmerged close colonies
+                || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.dlc)))); // annexed + DLC
         }
-       
+
+        private static bool SharedOwner(string owner, string targetOwner)
+        {
+            return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
+        }
+        private static bool ShouldMergeByDLC(Territory selected, Territory target)
+        {
+            return !string.IsNullOrWhiteSpace(selected.dlc)
+                && !string.IsNullOrWhiteSpace(target.dlc)
+                && selected.dlc.Equals(target.dlc, StringComparison.OrdinalIgnoreCase)
+                && selected.SameOwner
+                && target.SameOwner;
+        }
+
         private static bool ShouldMergeByPolice(Sector origin, Sector destination)
         {
             //works for Terrans and Avarice
@@ -159,17 +182,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var targetOwner = destination.CurrentOwner.ToLower();
             return PoliceFactions.ContainsKey(targetOwner) && owner.Equals(PoliceFactions[targetOwner]);
         }
-
-        private static bool ShouldMergeByDLC(Territory selected, Territory target)
-        {
-            return !string.IsNullOrWhiteSpace(selected.dlc) 
-                && !string.IsNullOrWhiteSpace(target.dlc) 
-                && selected.dlc.Equals(target.dlc, StringComparison.OrdinalIgnoreCase)
-                && selected.SameOwner
-                && target.SameOwner;
-        }
-
-
         private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
             Action<Cluster, bool> SortTerritory = (cluster, reset) =>
@@ -185,7 +197,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 territory.Clusters.Add(cluster);
                 cluster.AssignedTerritoryId = territory.id;
             };
-            
+
             Func<Cluster, HashSet<Cluster>, IEnumerable<Cluster>> GetNeighbors = (location, crowd) =>
             {
                 var targetPositions = NeighborOffsets
@@ -231,119 +243,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             // logging
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
-        }
-
-        private List<int> SequencedDomainFromHash(int idx, HashSet<int> group)
-        {
-            List<int> result = [];
-            if (KeepSequence(group.Select(x => territories[x]).ToList()))
-            {
-                result = group.OrderBy(x => x).ToList();
-                sequentialDomains.Add(idx); //note that down for later.
-            }
-            else
-            {
-                result = group.OrderBy(x => Random.Shared.Next()).ToList();
-            }
-            return result;
-        }
-
-        private List<HashSet<int>> MergeOverlappingDomains()
-        {
-            List<HashSet<int>> mergedGroups = [];
-
-            Action<HashSet<int>, bool> MergeDomains = (entry, reset) =>
-            {
-                if (reset) mergedGroups.Add(entry);
-                else mergedGroups.Last().UnionWith(entry);
-            };
-
-            Func<HashSet<int>, HashSet<HashSet<int>>, IEnumerable<HashSet<int>>> GetIntersecting = (entry, crowd) =>
-            {
-                return crowd.Where(x => entry.Intersect(x).Any());
-            };
-
-            Toolbox.FlexFloodProcessor(domains.Values.Select(e => e.ToHashSet()).ToList(), MergeDomains, GetIntersecting);
-            return mergedGroups;
-        }
-
-        private List<HashSet<int>> MergeAndFilterOutDomains(List<HashSet<int>> groups)
-        {
-            List<HashSet<int>> result = [];
-            foreach (var g in groups)
-            {
-                if (g.Count > 1 && g.Any(x => territories[x].toMerge))
-                {
-                    var extracted = g.Where(x => territories[x].toMerge).ToHashSet();
-                    var leftovers = g.Where(x => !territories[x].toMerge).ToHashSet();
-                    int replacement = -1;
-                    // If there are at least 2 to merge, then proceed:
-                    if (extracted.Count > 1)
-                    {
-                        replacement = MergeDomain(extracted);
-                    }
-                    // Somehow, there's only 1 to merge, in which case nothing happens.
-                    else
-                    {
-                        result.Add(g);
-                        continue;
-                    }
-                    // If there are unmerged items left
-                    if (leftovers.Count > 0)
-                    {
-                        // First, fix the now outdated annexedIds registries.
-                        extracted.Remove(replacement);
-                        foreach (var id in leftovers)
-                        {
-                            var territory = territories[id];
-                            // On territories that were connected (not all of them), replace merged ids with the remaining one. 
-                            if (extracted.Intersect(territory.annexedIds).Any())
-                            {
-                                territory.annexedIds.RemoveAll(extracted.Contains);
-                                territory.annexedIds.Add(replacement);
-                                // Also add back its id to the newly merged. 
-                                territories[replacement].annexedIds.AddUnique(territory.id);
-                            }
-                        }
-                        // Bring back the merged territory
-                        if (replacement > 0) leftovers.Add(replacement);
-                        result.Add(leftovers);
-                    }
-                    // All items were merged, so we just put it back as one.
-                    else
-                    {
-                        result.Add(new HashSet<int>() { replacement });
-                    }
-                }
-                else
-                {
-                    result.Add(g);
-                }
-            }
-            return result;
-        }
-
-        private int MergeDomain(HashSet<int> g)
-        {
-            var lead = g.First();
-            var territory = territories[lead];
-            List<int> absorbed = [];
-            foreach (var i in g.Skip(1))
-            {
-                var target = territories[i];
-                territory.Absorb(target);
-                absorbed.Add(i);
-            }
-            territory.annexedIds.RemoveAll(absorbed.Contains);
-            territory.closeColonyIds.Clear();
-            List<string> absorbedReport = absorbed.Select(x => $"#{x}({territories[x].seed.Name})").ToList();
-            string separator = absorbed.Count() == 2 ? " and " : ", ";
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{string.Join(separator, absorbedReport)} merged into #{territory.id}({territory.seed.Name})");
-            foreach (var i in absorbed)
-            {
-                territories.Remove(i);
-            }
-            return lead;
         }
 
         private Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
@@ -402,8 +301,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         target.annexedIds.AddUnique(territory.id);
                         var key = domains.Count + 1;
                         domains.Add(key, [territory.id, targetId]);
-                                territory.toMerge |= toMerge;
-                                target.toMerge |= toMerge;
+                        territory.toMerge |= toMerge;
+                        target.toMerge |= toMerge;
                     }
                 }
             }
@@ -452,14 +351,133 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
-        private static bool KeepSequence(List<Territory> set)
+        private void InferOrientations()
         {
-            //Spares certain domain sets from spawning in randomized order
-            return set.Count > 1
-                && (set.Any(x => x.isBridge) // unmerged close colonies
-                || (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.dlc)))); // annexed + DLC
+            foreach (var domain in domains.Values)
+            {
+                for (int i = 0; i < domain.Count; i++)
+                {
+                    if (territories.ContainsKey(domain[i]))
+                    {
+                        var territory = territories[domain[i]];
+                        territory.SetUpDirection(i > 0);
+                    }
+                }
+            }
         }
 
+        private List<HashSet<int>> MergeAndFilterOutDomains(List<HashSet<int>> groups)
+        {
+            List<HashSet<int>> result = [];
+            foreach (var g in groups)
+            {
+                if (g.Count > 1 && g.Any(x => territories[x].toMerge))
+                {
+                    var extracted = g.Where(x => territories[x].toMerge).ToHashSet();
+                    var leftovers = g.Where(x => !territories[x].toMerge).ToHashSet();
+                    int replacement = -1;
+                    // If there are at least 2 to merge, then proceed:
+                    if (extracted.Count > 1)
+                    {
+                        replacement = MergeDomain(extracted);
+                    }
+                    // Somehow, there's only 1 to merge, in which case nothing happens.
+                    else
+                    {
+                        result.Add(g);
+                        continue;
+                    }
+                    // If there are unmerged items left
+                    if (leftovers.Count > 0)
+                    {
+                        // First, fix the now outdated annexedIds registries.
+                        extracted.Remove(replacement);
+                        foreach (var id in leftovers)
+                        {
+                            var territory = territories[id];
+                            // On territories that were connected (not all of them), replace merged ids with the remaining one.
+                            if (extracted.Intersect(territory.annexedIds).Any())
+                            {
+                                territory.annexedIds.RemoveAll(extracted.Contains);
+                                territory.annexedIds.Add(replacement);
+                                // Also add back its id to the newly merged.
+                                territories[replacement].annexedIds.AddUnique(territory.id);
+                            }
+                        }
+                        // Bring back the merged territory
+                        if (replacement > 0) leftovers.Add(replacement);
+                        result.Add(leftovers);
+                    }
+                    // All items were merged, so we just put it back as one.
+                    else
+                    {
+                        result.Add(new HashSet<int>() { replacement });
+                    }
+                }
+                else
+                {
+                    result.Add(g);
+                }
+            }
+            return result;
+        }
+
+        private int MergeDomain(HashSet<int> g)
+        {
+            var lead = g.First();
+            var territory = territories[lead];
+            List<int> absorbed = [];
+            foreach (var i in g.Skip(1))
+            {
+                var target = territories[i];
+                territory.Absorb(target);
+                absorbed.Add(i);
+            }
+            territory.annexedIds.RemoveAll(absorbed.Contains);
+            territory.closeColonyIds.Clear();
+            List<string> absorbedReport = absorbed.Select(x => $"#{x}({territories[x].seed.Name})").ToList();
+            string separator = absorbed.Count() == 2 ? " and " : ", ";
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{string.Join(separator, absorbedReport)} merged into #{territory.id}({territory.seed.Name})");
+            foreach (var i in absorbed)
+            {
+                territories.Remove(i);
+            }
+            return lead;
+        }
+
+        private List<HashSet<int>> MergeOverlappingDomains()
+        {
+            List<HashSet<int>> mergedGroups = [];
+
+            Action<HashSet<int>, bool> MergeDomains = (entry, reset) =>
+            {
+                if (reset) mergedGroups.Add(entry);
+                else mergedGroups.Last().UnionWith(entry);
+            };
+
+            Func<HashSet<int>, HashSet<HashSet<int>>, IEnumerable<HashSet<int>>> GetIntersecting = (entry, crowd) =>
+            {
+                return crowd.Where(x => entry.Intersect(x).Any());
+            };
+
+            Toolbox.FlexFloodProcessor(domains.Values.Select(e => e.ToHashSet()).ToList(), MergeDomains, GetIntersecting);
+            return mergedGroups;
+        }
+
+        private List<int> SequencedDomainFromHash(int idx, HashSet<int> group)
+        {
+            List<int> result = [];
+            if (KeepSequence(group.Select(x => territories[x]).ToList()))
+            {
+                result = group.OrderBy(x => x).ToList();
+                sequentialDomains.Add(idx); //note that down for later.
+            }
+            else
+            {
+                result = group.OrderBy(x => Random.Shared.Next()).ToList();
+            }
+            return result;
+        }
         private void TerritoriesReport()
         {
             var log = new StringBuilder();
@@ -476,97 +494,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString());
         }
-
-        private void InferOrientations()
-        {
-            foreach (var domain in domains.Values)
-            {
-                for (int i = 0; i < domain.Count; i++)
-                {
-                    if (territories.ContainsKey(domain[i]))
-                    {
-                        var territory = territories[domain[i]];
-                        territory.SetUpDirection(i > 0);
-                    }
-                }
-            }
-        }
-
-        #endregion
+        #endregion territories
 
         #region shuffler
-        internal Territory PickNextFromStaged(string path, ref int skipTracker, out bool isResuming)
-        {
-            bool domsRemain = domains.Count > 0;
-            bool stagedRemain = staged.Count > 0;
-
-            //Bail out if something hasn't been intialized or the lists have been exausted.
-            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0))
-            {
-                isResuming = false;
-                return null;
-            }
-
-            isResuming = IsCloseToHome(path, out string ancestor); //detects if the current slot connects with an ongoing sequence.
-            var branch = isResuming ? ancestor : path.GetAddressAtDepth(1); //selects either the main branch or the divergence point for a sequence.
-            if (string.IsNullOrEmpty(branch) || branch == "0")
-            {
-                branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
-            }
-            if (!staged.ContainsKey(branch))
-            {
-                staged.Add(branch, new List<int>());
-            }
-            if (staged[branch].Count == 0)
-            {
-                //This queue is empty! Cross out that branch (it will be re-added automatically later if needed) and bail out.
-                staged.Remove(branch);
-
-                //Also clean up any eventual notes on parallel branches.
-                var obsoleteParallels = sequencesInParalelBranches.ReverseLookup(branch);
-                if (obsoleteParallels.Any())
-                {
-                    foreach (var key in obsoleteParallels)
-                    {
-                        sequencesInParalelBranches.Remove(key);
-                    }
-                }
-                if (!domsRemain)
-                {
-                    skipTracker++;
-                    return null;
-                }
-                //And any other non-root emptied-out branches.
-                var depleted = domains.Where(x => x.Key > 9 && x.Value.Count == 0).Select(x => x.Key).ToList();
-                if (depleted.Count > 0)
-                {
-                    foreach (var key in depleted)
-                    {
-                        domains.Remove(key);
-                    }
-                }
-                //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Branch: {branch}. isResuming = {isResuming}. Staged domains:\n{string.Join(", ",staged.Select(x => $"#{x.Key}[{string.Join(",",x.Value)}]"))}",true);
-
-                //Load another set:
-                //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
-                branch = RefreshStage(branch, path);
-            }
-            if (!staged.TryGetValue(branch, out var selected) || selected == null || selected.Count == 0)
-            {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: unable to find a valid domain set in the staged collection.");
-                return null;
-            }
-            else if (selected.Any(x => !territories.ContainsKey(x)))
-            {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Some selected territories don't exist.Attempting to purge them.");
-                selected = selected.Where(x => territories.ContainsKey(x)).ToList();
-                if (selected.Count == 0) return null;
-            }
-            var card = selected.First();
-            staged[branch].Remove(card);
-            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Selected {territories[card].seed.Name} for path {path}. skipTracker={skipTracker}, isResuming={isResuming}, ancestor={ancestor}, branch={branch}.", true);
-            return territories[card];
-        }
 
         internal void Shuffle()
         {
@@ -584,7 +514,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             bool inBounds = true, firstRun = true;
             List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
             List<ImmutableList<int>> domainsList = domains.Values.Where(x => x.Count > 1).Select(x => x.ToImmutableList()).ToList();
-
 
             bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
@@ -710,9 +639,276 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var delayed = DelayedBridges(orphanedRoads, secondaryRoads);
             _ = Toolbox.LogAsync(level, (delayed > 0 ?
                 $"{delayed} more gate connections were made for territories that ended up isolated." : "No isolated territories after shuffling.")
-                + " The network will now be stitched together...",true);
+                + " The network will now be stitched together...", true);
             FinalizeNetwork(domainsList);
         }
+
+        private void HandleMisplaced(List<Cluster> misplaced)
+        {
+            if (misplaced.Count == 0) return;
+            int y = 1;
+            foreach (var c in misplaced)
+            {
+                StringBuilder log = new StringBuilder();
+                log.Append($"{c.Name}, from territory #{c.AssignedTerritoryId}-{territories[c.AssignedTerritoryId].seed.Name} couldn't be placed @ {c.Position.ToTuple()}... ");
+                if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
+                {
+                    log.Append("solved on a second try.");
+                }
+                else
+                {
+                    var failed = c.Position;
+                    c.Position = occupiedMax.Add(new Point(gap, y * VertGap)).FitToHex();
+                    y++;
+                    if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
+                    {
+                        log.Append($"pushed aside and placed @ {c.Position.ToTuple()}.");
+                    }
+                    else
+                    {
+                        log.Append($"ERROR: failure to push it aside. We couldn't place it anywhere! Last attempt: {c.Position.ToTuple()}.");
+                    }
+                }
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString(), true);
+            }
+        }
+
+        private bool HasAncestorStaged(string path, out string found)
+        {
+            var generation = path.Length;
+            if (generation <= 2) goto fail; //that would just return the trunk or main branch, in which case regular beahviour will do.
+            for (var i = generation - 1; i > 1; i--)
+            {
+                var tested = path.GetAddressAtDepth(i);
+                if (staged.ContainsKey(tested))
+                {
+                    found = tested;
+                    return true;
+                }
+            }
+            fail:
+            found = path;
+            return false;
+        }
+
+        private bool IsCloseToHome(string path, out string found)
+        {
+            if (path.Length < 2) goto Fail;
+            var paralel = path.GetParalelOlderAddress();
+            if (paralel.GetMainBranch() == path.GetMainBranch())
+            {
+                if (sequencesInParalelBranches.ContainsKey(paralel))
+                {
+                    found = sequencesInParalelBranches[paralel];
+                    goto Parallel;
+                }
+                else if (staged.ContainsKey(paralel))
+                {
+                    found = paralel;
+                    goto Parallel;
+                }
+                else if (HasAncestorStaged(paralel, out found)) goto Parallel;
+            }
+            var parent = path.GetParentAddress();
+            if (sequencesInParalelBranches.ContainsKey(parent))
+            {
+                found = sequencesInParalelBranches[parent];
+                return true;
+            }
+            else if (staged.ContainsKey(parent))
+            {
+                found = parent;
+                return true;
+            }
+            else if (HasAncestorStaged(parent, out found)) return true;
+
+            Fail:
+            found = path;
+            return false;
+
+            Parallel:
+            sequencesInParalelBranches.TryAdd(path, found);
+            return true;
+        }
+
+        private List<(Point position, string address)> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, string parentAddress)
+        {
+            var branch = parentAddress.GetMainBranch();
+            var lastDir = parentAddress.GetDirection();
+            bool firstRun = branch == Direction.Undefined;
+            bool quadrant = branch == lastDir;
+            bool cycle = quadrant && branch == Direction.Right;
+            var ax = territory.Anchor.X;
+            var ay = territory.Anchor.Y;
+            var width = territory.size.X;
+            var height = territory.HeightToFit;
+            var slots = new List<(Point pos, string add)>();
+            var max = occupied.Max();
+            var min = occupied.Min();
+            if (cycle) helixGeneration++;
+
+            //logging
+            List<string> log = new List<string>();
+            string level = MethodBase.GetCurrentMethod().Name;
+
+            //finishing routine
+            void Select(Point slot, Direction dir)
+            {
+                bool front = slot.X > max.X || slot.X < min.X || slot.Y > max.Y || slot.Y < min.Y;
+                if (front || !occupied.Contains(slot))
+                {
+                    var add = parentAddress.DownstreamAddress(dir);
+                    slots.Add((slot, add));
+                    log.Add($"{slot.ToTuple()}/{dir}/{add}");
+                }
+                else
+                {
+                    _ = Toolbox.LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {branch})");
+                }
+            }
+
+            //Place future slots, in clockwise order
+            if (branch == Direction.Right || firstRun)
+            {
+                if (quadrant) Select(new Point(ax + width + gap, ay), Direction.Right);
+                if (!firstRun) Select(new Point(ax, ay - height - VertGap), Direction.Down);
+            }
+            if (branch == Direction.Down || firstRun)
+            {
+                if (quadrant) Select(new Point(ax + width - 1, ay - height - VertGap), Direction.Down);
+                if (!firstRun) Select(new Point(ax - 1 - gap, ay), Direction.Left);
+            }
+            if (branch == Direction.Left || firstRun)
+            {
+                if (quadrant) Select(new Point(ax - 1 - gap, ay - height + 2), Direction.Left);
+                if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + VertGap), Direction.Up);
+            }
+            if (branch == Direction.Up || firstRun)
+            {
+                if (quadrant) Select(new Point(ax, ay + 2 + VertGap), Direction.Up);
+                if (!firstRun) Select(new Point(ax + width + gap, ay - height + 2), Direction.Right);
+            }
+            if (slots.Count() == 0)
+            {
+                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.id}! Branch: {branch})");
+            }
+            _ = Toolbox.LogAsync(level, $"Slots around #{territory.id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
+
+            return slots.ToList();
+        }
+
+        private Territory PickNextFromStaged(string path, ref int skipTracker, out bool isResuming)
+        {
+            bool domsRemain = domains.Count > 0;
+            bool stagedRemain = staged.Count > 0;
+
+            //Bail out if something hasn't been intialized or the lists have been exausted.
+            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0))
+            {
+                isResuming = false;
+                return null;
+            }
+
+            isResuming = IsCloseToHome(path, out string ancestor); //detects if the current slot connects with an ongoing sequence.
+            var branch = isResuming ? ancestor : path.GetAddressAtDepth(1); //selects either the main branch or the divergence point for a sequence.
+            if (string.IsNullOrEmpty(branch) || branch == "0")
+            {
+                branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
+            }
+            if (!staged.ContainsKey(branch))
+            {
+                staged.Add(branch, new List<int>());
+            }
+            if (staged[branch].Count == 0)
+            {
+                //This queue is empty! Cross out that branch (it will be re-added automatically later if needed) and bail out.
+                staged.Remove(branch);
+
+                //Also clean up any eventual notes on parallel branches.
+                var obsoleteParallels = sequencesInParalelBranches.ReverseLookup(branch);
+                if (obsoleteParallels.Any())
+                {
+                    foreach (var key in obsoleteParallels)
+                    {
+                        sequencesInParalelBranches.Remove(key);
+                    }
+                }
+                if (!domsRemain)
+                {
+                    skipTracker++;
+                    return null;
+                }
+                //And any other non-root emptied-out branches.
+                var depleted = domains.Where(x => x.Key > 9 && x.Value.Count == 0).Select(x => x.Key).ToList();
+                if (depleted.Count > 0)
+                {
+                    foreach (var key in depleted)
+                    {
+                        domains.Remove(key);
+                    }
+                }
+                //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Branch: {branch}. isResuming = {isResuming}. Staged domains:\n{string.Join(", ",staged.Select(x => $"#{x.Key}[{string.Join(",",x.Value)}]"))}",true);
+
+                //Load another set:
+                //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
+                branch = RefreshStage(branch, path);
+            }
+            if (!staged.TryGetValue(branch, out var selected) || selected == null || selected.Count == 0)
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: unable to find a valid domain set in the staged collection.");
+                return null;
+            }
+            else if (selected.Any(x => !territories.ContainsKey(x)))
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Some selected territories don't exist.Attempting to purge them.");
+                selected = selected.Where(x => territories.ContainsKey(x)).ToList();
+                if (selected.Count == 0) return null;
+            }
+            var card = selected.First();
+            staged[branch].Remove(card);
+            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Selected {territories[card].seed.Name} for path {path}. skipTracker={skipTracker}, isResuming={isResuming}, ancestor={ancestor}, branch={branch}.", true);
+            return territories[card];
+        }
+        private string RefreshStage(string branch, string path)
+        {
+            var set = domains.Random();
+            if (set.Value == null)
+            {
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+            }
+            if (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path))
+            {
+                //It's a sequence, needs own branch.
+                staged.Add(path, set.Value);
+                domains.Remove(set.Key);
+                branch = path;
+            }
+            else
+            {
+                //New set replaces the depleted one.
+                staged[branch] = set.Value;
+                domains.Remove(set.Key);
+            }
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Starting a new domain - [{string.Join(", ", set.Value)}]. Loaded to branch {branch}.", true);
+            return branch;
+        }
+
+        private void UpdateClusterMap(List<Cluster> clusters, List<Cluster> misplaced)
+        {
+            foreach (var c in clusters)
+            {
+                if (!MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
+                {
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing {c.Name} @ {c.Position.ToTuple()}, set aside...");
+                    misplaced.Add(c);
+                }
+            }
+        }
+
+        #endregion shuffler
+
+        #region Placement
+
         private static Point AnchorRelativeToDirection(Direction direction, Point position, int flipX, int flipY)
         {
             Point result = Point.Empty;
@@ -965,27 +1161,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             vector = GetDriftVector(pos, GetDriftDirection(pos), moveX, moveY);
             return !vector.IsEmpty;
         }
-        private Direction GetOutwardDirection(Point pos)
-        {
-            //Direction is based on position, 45 degrees quadrants.
-            if (InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X || pos.X < SquareBoundary && pos.Y > SquareBoundary)
-            {
-                return Direction.Up;
-            }
-            else if (InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X || pos.X > -SquareBoundary && pos.Y < -SquareBoundary)
-            {
-                return Direction.Down;
-            }
-            else if (InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y || pos.X > SquareBoundary && pos.Y > -SquareBoundary)
-            {
-                return Direction.Right;
-            }
-            else if (InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y || pos.X < -SquareBoundary && pos.Y < SquareBoundary)
-            {
-                return Direction.Left;
-            }
-            return Direction.Undefined;
-        }
 
         private Direction GetDriftDirection(Point pos)
         {
@@ -1020,184 +1195,33 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return Point.Empty;
         }
 
-        private void HandleMisplaced(List<Cluster> misplaced)
+        private Direction GetOutwardDirection(Point pos)
         {
-            if (misplaced.Count == 0) return;
-            int y = 1;
-            foreach (var c in misplaced)
+            //Direction is based on position, 45 degrees quadrants.
+            if (InsideSquare(pos) && pos.Y > pos.X && pos.Y > -pos.X || pos.X < SquareBoundary && pos.Y > SquareBoundary)
             {
-                StringBuilder log = new StringBuilder();
-                log.Append($"{c.Name}, from territory #{c.AssignedTerritoryId}-{territories[c.AssignedTerritoryId].seed.Name} couldn't be placed @ {c.Position.ToTuple()}... ");
-                if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
-                {
-                    log.Append("solved on a second try.");
-                }
-                else
-                {
-                    var failed = c.Position; 
-                    c.Position = occupiedMax.Add(new Point(gap, y * VertGap)).FitToHex();
-                    y++;
-                    if (MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
-                    {
-                        log.Append($"pushed aside and placed @ {c.Position.ToTuple()}.");
-                    }
-                    else
-                    {
-                        log.Append($"ERROR: failure to push it aside. We couldn't place it anywhere! Last attempt: {c.Position.ToTuple()}.");
-                    }
-                }
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString(), true);
+                return Direction.Up;
             }
+            else if (InsideSquare(pos) && pos.Y < pos.X && pos.Y < -pos.X || pos.X > -SquareBoundary && pos.Y < -SquareBoundary)
+            {
+                return Direction.Down;
+            }
+            else if (InsideSquare(pos) && pos.X > pos.Y && pos.X > -pos.Y || pos.X > SquareBoundary && pos.Y > -SquareBoundary)
+            {
+                return Direction.Right;
+            }
+            else if (InsideSquare(pos) && pos.X < pos.Y && pos.X < -pos.Y || pos.X < -SquareBoundary && pos.Y < SquareBoundary)
+            {
+                return Direction.Left;
+            }
+            return Direction.Undefined;
         }
 
-        private bool HasAncestorStaged(string path, out string found)
+        private bool IsValidPlacement(Point position, bool singleTile, SortedSet<cPoint> occupied, int width, int height)
         {
-            var generation = path.Length;
-            if (generation <= 2) goto fail; //that would just return the trunk or main branch, in which case regular beahviour will do.
-            for (var i = generation - 1; i > 1; i--)
-            {
-                var tested = path.GetAddressAtDepth(i);
-                if (staged.ContainsKey(tested))
-                {
-                    found = tested;
-                    return true;
-                }
-            }
-            fail:
-            found = path;
-            return false;
+            return singleTile ? !occupied.Contains(position) : !SimpleCollision(occupied, position, width, height);
         }
 
-        private bool IsCloseToHome(string path, out string found)
-        {
-            if (path.Length < 2) goto Fail;
-            var paralel = path.GetParalelOlderAddress();
-            if (paralel.GetMainBranch() == path.GetMainBranch())
-            {
-                if (sequencesInParalelBranches.ContainsKey(paralel))
-                {
-                    found = sequencesInParalelBranches[paralel];
-                    goto Parallel;
-                }
-                else if (staged.ContainsKey(paralel))
-                {
-                    found = paralel;
-                    goto Parallel;
-                }
-                else if (HasAncestorStaged(paralel, out found)) goto Parallel;
-            }
-            var parent = path.GetParentAddress();
-            if (sequencesInParalelBranches.ContainsKey(parent))
-            {
-                found = sequencesInParalelBranches[parent];
-                return true;
-            }
-            else if (staged.ContainsKey(parent))
-            {
-                found = parent;
-                return true;
-            }
-            else if (HasAncestorStaged(parent, out found)) return true;
-            
-            Fail:
-            found = path;
-            return false;
-
-            Parallel:
-            sequencesInParalelBranches.TryAdd(path, found);
-            return true;
-        }
-
-        private List<(Point position, string address)> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, string parentAddress)
-        {
-            var branch = parentAddress.GetMainBranch();
-            var lastDir = parentAddress.GetDirection();
-            bool firstRun = branch == Direction.Undefined;
-            bool quadrant = branch == lastDir;
-            bool cycle = quadrant && branch == Direction.Right;
-            var ax = territory.Anchor.X;
-            var ay = territory.Anchor.Y;
-            var width = territory.size.X;
-            var height = territory.HeightToFit;
-            var slots = new List<(Point pos, string add)>();
-            var max = occupied.Max();
-            var min = occupied.Min();
-            if (cycle) helixGeneration++;
-
-            //logging
-            List<string> log = new List<string>();
-            string level = MethodBase.GetCurrentMethod().Name;
-
-            //finishing routine
-            void Select(Point slot, Direction dir)
-            {
-                bool front = slot.X > max.X || slot.X < min.X || slot.Y > max.Y || slot.Y < min.Y;
-                if (front || !occupied.Contains(slot))
-                {
-                    var add = parentAddress.DownstreamAddress(dir);
-                    slots.Add((slot, add));
-                    log.Add($"{slot.ToTuple()}/{dir}/{add}");
-                }
-                else
-                {
-                    _ = Toolbox.LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {branch})");
-                }
-            }
-
-            //Place future slots, in clockwise order
-            if (branch == Direction.Right || firstRun)
-            {
-                if (quadrant) Select(new Point(ax + width + gap, ay), Direction.Right);
-                if (!firstRun) Select(new Point(ax, ay - height - VertGap), Direction.Down);
-            }
-            if (branch == Direction.Down || firstRun)
-            {
-                if (quadrant) Select(new Point(ax + width - 1, ay - height - VertGap), Direction.Down);
-                if (!firstRun) Select(new Point(ax - 1 - gap, ay), Direction.Left);
-            }
-            if (branch == Direction.Left || firstRun)
-            {
-                if (quadrant) Select(new Point(ax - 1 - gap, ay - height + 2), Direction.Left);
-                if (!firstRun) Select(new Point(ax + width - 1, ay + 2 + VertGap), Direction.Up);
-            }
-            if (branch == Direction.Up || firstRun)
-            {
-                if (quadrant) Select(new Point(ax, ay + 2 + VertGap), Direction.Up);
-                if (!firstRun) Select(new Point(ax + width + gap, ay - height + 2), Direction.Right);
-            }
-            if (slots.Count() == 0)
-            {
-                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.id}! Branch: {branch})");
-            }
-            _ = Toolbox.LogAsync(level, $"Slots around #{territory.id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
-
-            return slots.ToList();
-        }
-
-        private string RefreshStage(string branch, string path)
-        {
-            var set = domains.Random();
-            if (set.Value == null)
-            {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
-            }
-            if (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path))
-            {
-                //It's a sequence, needs own branch.
-                staged.Add(path, set.Value);
-                domains.Remove(set.Key);
-                branch = path;
-            }
-            else
-            {
-                //New set replaces the depleted one.
-                staged[branch] = set.Value;
-                domains.Remove(set.Key);
-            }
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Starting a new domain - [{string.Join(", ", set.Value)}]. Loaded to branch {branch}.", true);
-            return branch;
-        }
-       
         private List<Point> ScanForCollisions(SortedSet<cPoint> occupied, Point position, int width, int height)
         {
             return Toolbox.Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)).ToList();
@@ -1208,7 +1232,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var hexPos = position.FitToHex(); //not fitting could result in undetected collisions
             return ScanForCollisions(occupied, hexPos, width, height).Any();
         }
-
         private bool TryToPushAround(Point position, Direction primaryDir, Direction secondaryDir, SortedSet<cPoint> occupied, int width, int height, int maxPush, ref Point vector)
         {
             if (primaryDir == Direction.Undefined) return false;
@@ -1237,28 +1260,121 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             vector = tPos.Subtract(position);
             return valid;
         }
+        #endregion Placement
 
-        private bool IsValidPlacement(Point position, bool singleTile, SortedSet<cPoint> occupied, int width, int height)
+        #region Reconnections
+
+        public bool CanConnectFromDirection((Cluster from, Cluster to) pair, Direction direction)
         {
-            return singleTile ? !occupied.Contains(position) : !SimpleCollision(occupied, position, width, height);
+            var origin = pair.from;
+            var target = pair.to;
+            return direction switch
+            {
+                Direction.Undefined => false,
+                Direction.Right => target.Position.X > origin.Position.X,
+                Direction.Down => target.Position.Y < origin.Position.Y,
+                Direction.Left => target.Position.X < origin.Position.X,
+                Direction.Up => target.Position.Y > origin.Position.Y,
+                _ => false
+            };
         }
 
-        private void UpdateClusterMap(List<Cluster> clusters, List<Cluster> misplaced)
+        private int DelayedBridges(List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
         {
-            foreach (var c in clusters)
+            var result = 0;
+            if (outgoing.Count == 0 || desired.Count == 0) goto finish;
+
+            Dictionary<(Cluster from, Cluster to), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit);
+            if (edges.Count == 0) goto finish;
+
+            List<Cluster> plugged = [];
+            foreach (var origin in outgoing)
             {
-                if (!MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
+                var subset = edges.Where(x => x.Key.from == origin).ToDictionary();
+                if (subset.Count == 0) continue;
+                (Cluster from, Cluster to) route;
+                Cluster destination;
+                do
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing {c.Name} @ {c.Position.ToTuple()}, set aside...");
-                    misplaced.Add(c);
+                    route = subset.MinBy(x => x.Value).Key;
+                    destination = route.to;
+                    subset.Remove(route);
                 }
+                while (subset.Count > 0 && territories[origin.AssignedTerritoryId].neighbors.Contains(destination.AssignedTerritoryId));
+                if (destination == null) continue;
+                GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
+                result++;
+                edges.Remove(route);
+                var taken = edges.Keys.Where(k => k.from == route.from || k.to == route.to).ToList(); //just one bridge to/from there per execution.
+                foreach (var key in taken)
+                {
+                    edges.Remove(key);
+                }
+            }
+            finish:
+            return result;
+        }
+
+        private void FinalizeNetwork(List<ImmutableList<int>> domainsList)
+        {
+            foreach (var territory in territories.Values)
+            {
+                territory.SetUpConnections();
+            }
+            StitchNetwork(FindNetworks(territories.Values.ToList()));
+            foreach (var set in domainsList)
+            {
+                StitchNetwork(FindNetworks(set.Select(x => territories[x]).ToList()), gateMaxDist * IntraDomainsDistFactor);
             }
         }
 
-        #endregion
+        private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f, Predicate<(Cluster, Cluster)> filter = null)
+        {
+            (Cluster, Cluster) result = (null, null);
+            var outgoing = outgoingHash.Where(x => x.PossibleExits.Count > 0).ToList();
+            desired = desired.Where(x => x.PossibleExits.Count > 0).ToList();
+            if (outgoing.Count == 0 || desired.Count == 0) goto finish;
+            Dictionary<(Cluster, Cluster), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit, filter);
+            if (edges.Count == 0) goto finish;
+            var ((origin, destination), _) = edges.MinBy(x => x.Value);
+            GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
+            result = (origin, destination);
 
-        #region Reconnections
-        private void    Reconnect(Territory territory, Direction alsoReachFor, bool firstRun, List<Cluster> orphanedRoads, List<Cluster> secondaryRoads)
+            finish:
+            flag = (result.Item1 != null && result.Item2 != null);
+            return result;
+        }
+
+        private List<List<int>> FindNetworks(List<Territory> territories)
+        {
+            List<List<int>> groups = [];
+
+            Action<Territory, bool> SortGroup = (territory, reset) =>
+            {
+                if (territory.unconnected) return;
+                if (reset)
+                {
+                    groups.Add(new List<int>() { territory.id });
+                    return;
+                }
+                groups.Last().Add(territory.id);
+            };
+
+            Func<Territory, HashSet<Territory>, IEnumerable<Territory>> GetConnected = (subject, crowd) =>
+            {
+                return crowd.Where(x => subject.neighbors.Contains(x.id));
+            };
+
+            Toolbox.FlexFloodProcessor(territories, SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
+
+            //logging
+            int count = groups.Count;
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count > 1 ? $"{count} groups" : "only one group")} out of {territories.Count} territories.", true);
+
+            return groups;
+        }
+
+        private void Reconnect(Territory territory, Direction alsoReachFor, bool firstRun, List<Cluster> orphanedRoads, List<Cluster> secondaryRoads)
         {
             HashSet<Cluster> outgoing = [];
             if (territory.ExitGates != null && !territory.isBridge)
@@ -1330,102 +1446,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
             territory.SetUpConnections();
         }
-
-        private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f, Predicate<(Cluster, Cluster)> filter = null)
-        {
-            (Cluster, Cluster) result = (null, null);
-            var outgoing = outgoingHash.Where(x => x.PossibleExits.Count > 0).ToList();
-            desired = desired.Where(x => x.PossibleExits.Count > 0).ToList();
-            if (outgoing.Count == 0 || desired.Count == 0) goto finish;
-            Dictionary<(Cluster, Cluster), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit, filter);
-            if (edges.Count == 0) goto finish;
-            var ((origin, destination), _) = edges.MinBy(x => x.Value);
-            GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
-            result = (origin, destination);
-
-            finish:
-            flag = (result.Item1 != null && result.Item2 != null);
-            return result;
-        }
-
-        private int DelayedBridges(List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
-        {
-            var result = 0;
-            if (outgoing.Count == 0 || desired.Count == 0) goto finish;
-
-            Dictionary<(Cluster from, Cluster to), float> edges = ClusterManager.BridgedParwiseDistances(outgoing, desired, limit);
-            if (edges.Count == 0) goto finish;
-
-            List<Cluster> plugged = [];
-            foreach (var origin in outgoing)
-            {
-                var subset = edges.Where(x => x.Key.from == origin).ToDictionary();
-                if (subset.Count == 0) continue;
-                (Cluster from, Cluster to) route;
-                Cluster destination;
-                do
-                {
-                    route = subset.MinBy(x => x.Value).Key;
-                    destination = route.to;
-                    subset.Remove(route);
-                }
-                while (subset.Count > 0 && territories[origin.AssignedTerritoryId].neighbors.Contains(destination.AssignedTerritoryId));
-                if (destination == null) continue;
-                GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
-                result++;
-                edges.Remove(route);
-                var taken = edges.Keys.Where(k => k.from == route.from || k.to == route.to).ToList(); //just one bridge to/from there per execution.
-                foreach (var key in taken)
-                {
-                    edges.Remove(key);
-                }
-            }
-            finish:
-            return result;
-        }
-
-        private void FinalizeNetwork(List<ImmutableList<int>> domainsList)
-        {
-            foreach (var territory in territories.Values)
-            {
-                territory.SetUpConnections();
-            }
-            StitchNetwork(FindNetworks(territories.Values.ToList()));
-            foreach (var set in domainsList)
-            {
-                StitchNetwork(FindNetworks(set.Select(x => territories[x]).ToList()), gateMaxDist * IntraDomainsDistFactor);
-            }
-        }
-
-        private List<List<int>> FindNetworks(List<Territory> territories)
-        {
-            List<List<int>> groups = [];
-
-            Action<Territory, bool> SortGroup = (territory, reset) =>
-            {
-                if (territory.unconnected) return;
-                if (reset)
-                {
-                    groups.Add(new List<int>() { territory.id });
-                    return;
-                }
-                groups.Last().Add(territory.id);
-            };
-
-            Func<Territory, HashSet<Territory>, IEnumerable<Territory>> GetConnected = (subject, crowd) =>
-            {
-                return crowd.Where(x => subject.neighbors.Contains(x.id));
-            };
-
-            Toolbox.FlexFloodProcessor(territories, SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
-
-            //logging
-            int count = groups.Count;
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count>1 ? $"{count} groups" : "only one group")} out of {territories.Count} territories.", true);
-
-            return groups;
-        }   
-
         private void StitchNetwork(List<List<int>> patches, float limit = -1f)
         {
             var ordered = patches.OrderBy(x => x.Count());
@@ -1460,26 +1480,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ",outHash)}" : "ERROR: Failed stitching!");
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ", outHash)}" : "ERROR: Failed stitching!");
                 }
             }
         }
-
-        public bool CanConnectFromDirection((Cluster from, Cluster to) pair, Direction direction)
-        {
-            var origin = pair.from;
-            var target = pair.to;
-            return direction switch
-            {
-                Direction.Undefined => false,
-                Direction.Right => target.Position.X > origin.Position.X,
-                Direction.Down => target.Position.Y < origin.Position.Y,
-                Direction.Left => target.Position.X < origin.Position.X,
-                Direction.Up => target.Position.Y > origin.Position.Y,
-                _ => false
-            };
-        }
-
-        #endregion
+        #endregion Reconnections
     }
 }
