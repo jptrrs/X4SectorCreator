@@ -1138,8 +1138,8 @@ namespace X4SectorCreator
                     // Check if it exist then adjust it else add it
                     Zone currentZone = currentSector.Zones.FirstOrDefault(a =>
                     {
-                        return (!string.IsNullOrWhiteSpace(a.Name) && !string.IsNullOrWhiteSpace(newZone.Name) && a.Name.Equals(newZone.Name, StringComparison.OrdinalIgnoreCase))
-|| ((a.Id != 0 || newZone.Id != 0) && a.Id == newZone.Id);
+                        return (!string.IsNullOrWhiteSpace(a.Name) && !string.IsNullOrWhiteSpace(newZone.Name) && a.Name.Equals(newZone.Name, StringComparison.OrdinalIgnoreCase)) ||
+                        ((a.Id != 0 || newZone.Id != 0) && a.Id == newZone.Id);
                     });
 
                     if (currentZone == null)

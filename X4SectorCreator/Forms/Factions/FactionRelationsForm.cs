@@ -83,8 +83,7 @@ namespace X4SectorCreator.Forms
                 Dictionary<string, double> diffs = null;
                 foreach (var inner in faction.Value)
                 {
-                    if ((!originalFactionRelations.TryGetValue(inner.Key, out var origValue)
-                        || !inner.Value.Equals(origValue)) && inner.Value != 0) // different or missing
+                    if ((!originalFactionRelations.TryGetValue(inner.Key, out var origValue) ||                    !inner.Value.Equals(origValue)) && inner.Value != 0) // different or missing
                     {
                         diffs ??= [];
                         diffs[inner.Key] = inner.Value;
