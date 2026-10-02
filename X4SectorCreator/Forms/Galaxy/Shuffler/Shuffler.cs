@@ -11,6 +11,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 {
     internal class Shuffler
     {
+        #region Header
+
         private const int gap = 1;
 
         private static readonly (int x, int y)[] NeighborOffsets =
@@ -28,7 +30,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private static int maxSlotAdjust = 7, squareBoundary = -1, IntraDomainsDistFactor = 3;
         // when reaching for connections within domains, it will be multiplied by IntraDomainsDistFactor.
 
-        private static Dictionary<string, string> policeFactions = [], sequencesInParalelBranches = [];
+        private static Dictionary<string, string> policeFactions = [];
 
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
                 {
@@ -62,7 +64,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private Point occupiedMax;
         private HashSet<int> sequentialDomains = [];
-        private Dictionary<string, List<int>> staged = [];
         private Dictionary<int, Territory> territories = [];
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
@@ -129,7 +130,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 return squareBoundary;
             }
         }
-        #region territories
+
+        #endregion Header
+
+        #region Territories
 
         private static bool ArePredeterminedClusterPair(Cluster subject, Cluster target)
         {
@@ -143,26 +147,27 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private static bool ArePredeterminedNeighbors(string owner, string targetOwner)
         {
-            return AdditionalVanillaMapping.ObligateNeighborFactions.ContainsKey(owner) &&            AdditionalVanillaMapping.ObligateNeighborFactions[owner] == targetOwner;
+            return AdditionalVanillaMapping.ObligateNeighborFactions.ContainsKey(owner) &&
+            AdditionalVanillaMapping.ObligateNeighborFactions[owner] == targetOwner;
         }
 
         private static bool IsVassal(string owner, string targetOwner)
         {
-            return AdditionalVanillaMapping.VassalFactions.ContainsKey(owner) &&            AdditionalVanillaMapping.VassalFactions[owner] == targetOwner;
+            return AdditionalVanillaMapping.VassalFactions.ContainsKey(owner) &&
+            AdditionalVanillaMapping.VassalFactions[owner] == targetOwner;
         }
 
         private static bool KeepSequence(List<Territory> set)
         {
-            //Spares certain domain sets from spawning in randomized order
-            return set.Count > 1 &&
-                (set.Any(x => x.isBridge) || // unmerged close colonies
-                (set.Any(x => x.annexedIds.Count > 0) && set.All(x => !string.IsNullOrWhiteSpace(x.dlc)))); // annexed + DLC
+            //Spares unmerged close colonies or sets marked to merge sets from spawning in randomized order
+            return set.Count > 1 && set.Any(x => x.isBridge || x.toMerge);
         }
 
         private static bool SharedOwner(string owner, string targetOwner)
         {
             return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
         }
+
         private static bool ShouldMergeByDLC(Territory selected, Territory target)
         {
             return !string.IsNullOrWhiteSpace(selected.dlc) &&
@@ -226,17 +231,18 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             List<HashSet<int>> groups = MergeOverlappingDomains();
 
             // filter out and merge the domains that ask for it.
-            List<HashSet<int>> groupsLeft = MergeAndFilterOutDomains(groups);
+            //List<HashSet<int>> groupsLeft = MergeAndFilterOutDomains(groups);
 
             // rebuild the dictionary so each entry is a consolidated domain.
             Dictionary<int, List<int>> consolidated = [];
             int idx = 0;
-            foreach (var g in groupsLeft)
+            foreach (var g in groups/*groupsLeft*/)
             {
                 idx++;
                 consolidated.Add(idx, /*g.OrderBy(x => Random.Shared.Next()).ToList()*/SequencedDomainFromHash(idx, g));
             }
             domains = DesignatedDomains(consolidated);
+            SequencesFinalOrder();
 
             // logging
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
@@ -262,6 +268,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 t.assignedDomainId = n;
                 set.Add(n, [t.id]);
             }
+            foreach (var t in territories.Values.Where(t => !t.unconnected))
+            {
+                t.UpdateLandlockedStatus();
+            }
             return set;
         }
 
@@ -271,7 +281,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 .SelectMany(t => t.Connections
                 .Select(c => (t, c.cluster, c.origin, c.destination)))
                 .ToList();
-            //List<int> annexed = [];
+            HashSet<Territory> annexed = [];
             foreach (var (territory, cluster, origin, destination) in connections)
             {
                 var targetId = destination.AssignedTerritoryId;
@@ -283,22 +293,30 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     var owner = origin.CurrentOwner.ToLower();
                     var targetOwner = destination.CurrentOwner.ToLower();
-                    if (owner == null/* || annexed.Contains(targetId)*/) continue;
-                    bool toMerge = mandatory ||                    (ShouldMergeByDLC(territory, target) &&                    (ShouldMergeByPolice(origin, destination) ||
-                    ((target.Landlocked || territory.Landlocked) && SharedOwner(owner, targetOwner))));
-                    bool sameOwner = SharedOwner(owner, targetOwner) ||                        ArePredeterminedNeighbors(owner, targetOwner) ||
+                    if (owner == null) continue;
+                    bool toMerge = mandatory ||
+                        (ShouldMergeByDLC(territory, target) &&
+                        (ShouldMergeByPolice(origin, destination) ||
+                        ((target.Landlocked || territory.Landlocked) && SharedOwner(owner, targetOwner))));
+                    bool sameOwner = SharedOwner(owner, targetOwner) ||
+                        ArePredeterminedNeighbors(owner, targetOwner) ||
                         IsVassal(owner, targetOwner);
                     if (toMerge || sameOwner)
                     {
                         territory.annexedIds.AddUnique(targetId);
-                        //annexed.Add(targetId);
                         target.annexedIds.AddUnique(territory.id);
                         var key = domains.Count + 1;
                         domains.Add(key, [territory.id, targetId]);
                         territory.toMerge |= toMerge;
                         target.toMerge |= toMerge;
+                        annexed.Add(target);
+                        annexed.Add(territory);
                     }
                 }
+            }
+            foreach (var territory in annexed)
+            {
+                territory.SetUpConnections();
             }
         }
 
@@ -319,25 +337,29 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     .ToList();
                 if (!connected.Any()) continue;
                 //merge only if only one set of owned territories is being bridged
-                bool toMerge = connected.Count == 1;
+                //bool toMerge = connected.Count == 1;
                 foreach (var grouped in connected)
                 {
+                    var bridge = territories[cluster.AssignedTerritoryId];
+                    bridge.isBridge = true;
+                    //bridge.toMerge = toMerge;
+                    bridge.closeColonyIds.AddRangeUnique(grouped.Select(x => x.id));
                     foreach (var neighbor in grouped)
                     {
-                        if (toMerge)
-                        {
-                            neighbor.toMerge = true;
-                        }
-                        else
-                        {
+                        //if (toMerge)
+                        //{
+                        //    neighbor.toMerge = true;
+                        //}
+                        //else
+                        //{
                             neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.id));
-                        }
+                            neighbor.closeColonyIds.Add(bridge.id);
+                            neighbor.SetUpConnections();
+                        //}
                     }
                     var bridged = grouped.Select(x => x.id).ToList();
                     cluster.BridgeFor.AddRange(bridged);
-                    var bridge = territories[cluster.AssignedTerritoryId];
-                    bridge.isBridge = true;
-                    bridge.toMerge = toMerge;
+
                     var extents = bridged.Append(bridge.id).ToList();
                     var id = domains.Count + 1;
                     domains.Add(id, extents);
@@ -461,10 +483,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private List<int> SequencedDomainFromHash(int idx, HashSet<int> group)
         {
             List<int> result = [];
-            if (KeepSequence(group.Select(x => territories[x]).ToList()))
+            if (KeepSequence(group.Select(id => territories[id]).ToList()))
             {
+                sequentialDomains.Add(idx); //just note that down for now.
                 result = group.OrderBy(x => x).ToList();
-                sequentialDomains.Add(idx); //note that down for later.
             }
             else
             {
@@ -472,6 +494,19 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             return result;
         }
+
+        private void SequencesFinalOrder()
+        {
+            foreach (var idx in sequentialDomains)
+            {
+                var domain = domains[idx];
+                if (domain.Where(i => !territories[i].Landlocked).Count() == 1)
+                {
+                    domains[idx] = domain.OrderBy(i => territories[i].Landlocked).ThenBy(i => i).ToList();
+                }
+            }
+        }
+
         private void TerritoriesReport()
         {
             var log = new StringBuilder();
@@ -488,9 +523,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString());
         }
-        #endregion territories
+        #endregion Territories
 
-        #region shuffler
+        #region Shuffler
 
         internal void Shuffle()
         {
@@ -506,10 +541,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Queue<(Point pos, string path)> slots = new([(Point.Empty, "0")]), deferred = [];
             SortedSet<cPoint> occupied = [];
             bool inBounds = true, firstRun = true;
+            Dictionary<string, StagedSet> staged = [];
+            Dictionary<string, string> sequencesInParalelBranches = [];
             List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
-            List<ImmutableList<int>> domainsList = domains.Values.Where(x => x.Count > 1).Select(x => x.ToImmutableList()).ToList();
+            Dictionary<int, ImmutableList<int>> domainsList = domains.Where(x => x.Value.Count > 1).Select(x => (x.Key,x.Value.ToImmutableList())).ToDictionary();
 
-            bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
+        bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
                 bool flag = false;
                 territory = null;
@@ -526,7 +563,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     pos = slot.pos;
                     dir = path.GetDirection();
                     branch = path.GetMainBranch();
-                    territory = PickNextFromStaged(slot.path, ref skipTracker, out isSequence);
+                    territory = PickNextFromStaged(staged, sequencesInParalelBranches, slot.path, ref skipTracker, out isSequence);
                     flag = territory != null;
                     if (flag)
                     {
@@ -549,7 +586,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         else
                         {
                             //end of the line
-                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots! Staged domains left out: {string.Join(", ", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value)}]"))}");
+                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots! Staged domains left out: {string.Join(", ", staged.Select(x => $"\n#{x.Key} [{string.Join(", ", x.Value.Territories)}]"))}");
                         }
                     }
                 }
@@ -573,15 +610,15 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
 
                 //Rotate it as needed.
-                if (direction != Direction.Undefined && territory.exitDirection != Direction.Undefined)
-                {
-                    var entryDirection = territory.exitDirection.OppositeDir();
-                    if (entryDirection != direction)
-                    {
-                        var turns = entryDirection.ClockwiseStepsTo(direction);
-                        territory.Rotate(turns);
-                    }
-                }
+                //if (direction != Direction.Undefined && territory.exitDirection != Direction.Undefined)
+                //{
+                //    var entryDirection = territory.exitDirection.OppositeDir();
+                //    if (entryDirection != direction)
+                //    {
+                //        var turns = entryDirection.ClockwiseStepsTo(direction);
+                //        territory.Rotate(turns);
+                //    }
+                //}
 
                 //Fine-tune the insertion spot so it fits right in.
                 var currentPos = territory.Anchor;
@@ -607,7 +644,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var cMinY = covered.MinBy(p => p.Y).Y;
                 var cMaxX = covered.MaxBy(p => p.X).X;
                 var cMinX = covered.MinBy(p => p.X).X;
-                _ = Toolbox.LogAsync(level, $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical, totalling {occupied.Count} now.");
+                _ = Toolbox.LogAsync(level,
+                    $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical, totalling {occupied.Count} now.");
 
                 //Update the board.
                 UpdateClusterMap(territory.Clusters, misplaced);
@@ -615,7 +653,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 //Redo connections
                 var reachAcross = !firstRun /*&& helixGeneration % periodicConnectionModule == 0*/ && direction == branch;
                 Direction reachDir = reachAcross ? (Direction)(((int)direction + 3) % 4) : Direction.Undefined;
-                Reconnect(territory, reachDir, firstRun, orphanedRoads, secondaryRoads);
+                Reconnect(territory, reachDir, firstRun, isSequence, orphanedRoads, secondaryRoads);
 
                 //Prepare the next slots.
                 var nextSlots = NextSlotsHelix(territory, occupied, path);
@@ -634,7 +672,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             _ = Toolbox.LogAsync(level, (delayed > 0 ?
                 $"{delayed} more gate connections were made for territories that ended up isolated." : "No isolated territories after shuffling.")
                 + " The network will now be stitched together...", true);
-            FinalizeNetwork(domainsList);
+            if (FinalizeNetwork(domainsList))
+            {
+                _ = Toolbox.LogAsync(level, $"Gate Network reestabilished. Galaxy shuffle complete.", true);
+            }
+            else
+            {
+                _ = Toolbox.LogAsync(level, $"ERROR: Shuffle procedure ended, but the gate network is still fragmented!", true);
+            }
         }
 
         private void HandleMisplaced(List<Cluster> misplaced)
@@ -667,7 +712,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
-        private bool HasAncestorStaged(string path, out string found)
+        private bool HasAncestorStaged(Dictionary<string, StagedSet> staged, string path, out string found)
         {
             var generation = path.Length;
             if (generation <= 2) goto fail; //that would just return the trunk or main branch, in which case regular beahviour will do.
@@ -685,44 +730,45 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return false;
         }
 
-        private bool IsCloseToHome(string path, out string found)
+        private string DirectAncestorStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path) 
         {
             if (path.Length < 2) goto Fail;
-            var paralel = path.GetParalelOlderAddress();
-            if (paralel.GetMainBranch() == path.GetMainBranch())
-            {
-                if (sequencesInParalelBranches.ContainsKey(paralel))
-                {
-                    found = sequencesInParalelBranches[paralel];
-                    goto Parallel;
-                }
-                else if (staged.ContainsKey(paralel))
-                {
-                    found = paralel;
-                    goto Parallel;
-                }
-                else if (HasAncestorStaged(paralel, out found)) goto Parallel;
-            }
             var parent = path.GetParentAddress();
             if (sequencesInParalelBranches.ContainsKey(parent))
             {
-                found = sequencesInParalelBranches[parent];
-                return true;
+                return sequencesInParalelBranches[parent];
             }
-            else if (staged.ContainsKey(parent))
+            else if (HasAncestorStaged(staged, path, out string found))
             {
-                found = parent;
-                return true;
+                return found;
             }
-            else if (HasAncestorStaged(parent, out found)) return true;
 
             Fail:
-            found = path;
-            return false;
+            return null;
+        }
 
-            Parallel:
-            sequencesInParalelBranches.TryAdd(path, found);
-            return true;
+        private string CloseEnoughToStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path)
+        {
+            if (path.Length < 2) goto Fail;
+            var parallel = path.GetParalelOlderAddress();
+            if (parallel.GetMainBranch() == path.GetMainBranch())
+            {
+                if (sequencesInParalelBranches.ContainsKey(parallel))
+                {
+                    return sequencesInParalelBranches[parallel];
+                }
+                else if (staged.ContainsKey(parallel))
+                {
+                    return parallel;
+                }
+                else if (HasAncestorStaged(staged, parallel, out var found))
+                {
+                    return found;
+                }
+            }
+
+            Fail:
+            return null;
         }
 
         private List<(Point position, string address)> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, string parentAddress)
@@ -791,99 +837,159 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return slots.ToList();
         }
 
-        private Territory PickNextFromStaged(string path, ref int skipTracker, out bool isResuming)
+        private Territory PickNextFromStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path, ref int skipTracker, out bool isSequence)
         {
-            bool domsRemain = domains.Count > 0;
-            bool stagedRemain = staged.Count > 0;
+            bool domsRemain = domains.Count > 0, stagedRemain = staged.Count > 0, firstRun = false, foundAny = false;
+            isSequence = false;
+            string branch = null;
+            var report = new StringBuilder();
 
-            //Bail out if something hasn't been intialized or the lists have been exausted.
-            if (!domsRemain && stagedRemain && staged.Values.All(x => x.Count == 0))
+            if (domsRemain) firstRun = !stagedRemain;
+            else if (stagedRemain && staged.Values.All(x => x.Territories.Count == 0))
             {
-                isResuming = false;
+                //Bail out if something hasn't been intialized or the lists have been exausted.
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+                    $"ERROR: all staged domains were empty!");
                 return null;
             }
 
-            isResuming = IsCloseToHome(path, out string ancestor); //detects if the current slot connects with an ongoing sequence.
-            var branch = isResuming ? ancestor : path.GetAddressAtDepth(1); //selects either the main branch or the divergence point for a sequence.
-            if (string.IsNullOrEmpty(branch) || branch == "0")
+            if (!firstRun)
             {
-                branch = "1"; //prevents the domain called at the origin from generating a dead-end entry.
-            }
-            if (!staged.ContainsKey(branch))
-            {
-                staged.Add(branch, new List<int>());
-            }
-            if (staged[branch].Count == 0)
-            {
-                //This queue is empty! Cross out that branch (it will be re-added automatically later if needed) and bail out.
-                staged.Remove(branch);
-
-                //Also clean up any eventual notes on parallel branches.
-                var obsoleteParallels = sequencesInParalelBranches.ReverseLookup(branch);
-                if (obsoleteParallels.Any())
+                //Detect if any of the staged groups fit the current slot:
+                // A. Look into the parallel branch, if any. In that case, the drafted set can't be a sequence (it can only be linear).
+                var closeEnoughAncestor = CloseEnoughToStaged(staged, sequencesInParalelBranches, path);
+                bool setOnParallel = false;
+                string parallelBranch = null;
+                if (closeEnoughAncestor != null && staged.TryGetValue(closeEnoughAncestor, out var parallelSet))
                 {
-                    foreach (var key in obsoleteParallels)
+                    if (parallelSet.Territories.Count > 0)
                     {
-                        sequencesInParalelBranches.Remove(key);
+                        setOnParallel = !parallelSet.IsSequential;
+                        parallelBranch = closeEnoughAncestor;
+                    }
+                    else
+                    {
+                        staged.Remove(closeEnoughAncestor);
+                        CleanUpParalelNotes(sequencesInParalelBranches, closeEnoughAncestor);
                     }
                 }
-                if (!domsRemain)
+
+                // B. Look into the slot's direct ancestor.
+                var directAncestor = DirectAncestorStaged(staged, sequencesInParalelBranches, path);
+                bool setOnDirect = false;
+                string directBranch = null;
+                if (directAncestor != null && staged.TryGetValue(directAncestor, out var directSet))
                 {
-                    skipTracker++;
-                    return null;
-                }
-                //And any other non-root emptied-out branches.
-                var depleted = domains.Where(x => x.Key > 9 && x.Value.Count == 0).Select(x => x.Key).ToList();
-                if (depleted.Count > 0)
-                {
-                    foreach (var key in depleted)
+                    if (directSet.Territories.Count > 0)
                     {
-                        domains.Remove(key);
+                        setOnDirect = true;
+                        directBranch = directAncestor;
+                    }
+                    else staged.Remove(directAncestor);
+                }
+
+                //Decide which one to use, if any
+                foundAny = setOnParallel || setOnDirect;
+                branch = parallelBranch ?? directBranch;
+                if (foundAny)
+                {
+                    report.Append($"Resuming set {branch} ");
+                    if (setOnParallel)
+                    {
+                        sequencesInParalelBranches.TryAdd(path, parallelBranch);
+                        report.Append("from a parallel branch");
+                    }
+                    else report.Append("on the same branch");
+                    report.Append($" from {path}.");
+                    //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: sequences for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",",x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}",true);
+                }
+            }
+
+            //If none of that worked, fall back to whoever is assigned to the base of that branch
+            if (!foundAny)
+            {
+                branch = path.GetAddressAtDepth(1);
+                if (string.IsNullOrEmpty(branch) || branch == "0")
+                {
+                    //Prevents the domain called at the origin from generating a dead-end entry.
+                    branch = "1";
+                }
+                if (!staged.TryGetValue(branch, out var baseSet) || baseSet.Territories.Count <= 0)
+                {
+                    //There were no groups on stage to draw from, meaning it's time to reset it.
+                    //First, if all domains were used already, that's the end.
+                    if (!domsRemain)
+                    {
+                        skipTracker++;
+                        return null;
+                    }
+                    //Otherwise, load another set:
+                    //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
+                    branch = RefreshStage(staged, branch, path);
+
+                    //Guaranteee there's a valid staged set after this. Note: double lookup is strictly necessary 
+                    if (!staged.TryGetValue(branch, out baseSet) || baseSet.Territories.Count == 0)
+                    {
+                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+                            $"ERROR: unable to find a valid domain set in the staged collection.");
+                        return null;
                     }
                 }
-                //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Branch: {branch}. isResuming = {isResuming}. Staged domains:\n{string.Join(", ",staged.Select(x => $"#{x.Key}[{string.Join(",",x.Value)}]"))}",true);
+                report.Append($"Picking from a new set for branch {branch}.");
+            }
 
-                //Load another set:
-                //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
-                branch = RefreshStage(branch, path);
-            }
-            if (!staged.TryGetValue(branch, out var selected) || selected == null || selected.Count == 0)
-            {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: unable to find a valid domain set in the staged collection.");
-                return null;
-            }
-            else if (selected.Any(x => !territories.ContainsKey(x)))
-            {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: Some selected territories don't exist.Attempting to purge them.");
-                selected = selected.Where(x => territories.ContainsKey(x)).ToList();
-                if (selected.Count == 0) return null;
-            }
-            var card = selected.First();
-            staged[branch].Remove(card);
-            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Selected {territories[card].seed.Name} for path {path}. skipTracker={skipTracker}, isResuming={isResuming}, ancestor={ancestor}, branch={branch}.", true);
+            var selected = staged[branch];
+            var card = selected.Territories.First();
+            selected.Territories.Remove(card);
+            isSequence = selected.IsSequential;
+            report.Append($" Selected: {card}");
+            if (selected.Territories.Count > 0) report.Append($" (remaining: [{string.Join(", ", selected.Territories)}])");
+            else staged.Remove(branch);
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, report.ToString() + ".", true);
             return territories[card];
         }
-        private string RefreshStage(string branch, string path)
+
+        private static void CleanUpParalelNotes(Dictionary<string, string> sequencesInParalelBranches, string branch)
+        {
+            var obsoleteParallels = sequencesInParalelBranches.ReverseLookup(branch);
+            foreach (var key in obsoleteParallels)
+            {
+                sequencesInParalelBranches.Remove(key);
+            }
+        }
+
+        private void CleanupDepletedDomains()
+        {
+            var depleted = domains.Where(x => x.Key > 9 && x.Value.Count == 0).Select(x => x.Key).ToList();
+            foreach (var key in depleted)
+            {
+                domains.Remove(key);
+            }
+        }
+
+        private string RefreshStage(Dictionary<string, StagedSet> staged, string branch, string path)
         {
             var set = domains.Random();
             if (set.Value == null)
             {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"ERROR: selected domain has a null list! Looking for branch {branch.ToString()}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+                    $"ERROR: selected domain has a null list! Looking for branch {branch}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
             }
-            if (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path))
+            bool isSequential = sequentialDomains.Contains(set.Key);
+            if (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path) && isSequential)
             {
-                //It's a sequence, needs own branch.
-                staged.Add(path, set.Value);
-                domains.Remove(set.Key);
+                // Sequential group gets its own branch
+                staged.Add(path, new StagedSet { Territories = set.Value, IsSequential = true });
                 branch = path;
             }
             else
             {
-                //New set replaces the depleted one.
-                staged[branch] = set.Value;
-                domains.Remove(set.Key);
+                // Replace or add to existing branch (for trunk branches)
+                staged[branch] = new StagedSet { Territories = set.Value, IsSequential = isSequential };
             }
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Starting a new domain - [{string.Join(", ", set.Value)}]. Loaded to branch {branch}.", true);
+            domains.Remove(set.Key);
+            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+            //    $"New domain drafted: [{string.Join(", ", set.Value)}].{(isSequential ? " It's a sequence!":"")} Loaded to branch {branch}.", true);
             return branch;
         }
 
@@ -899,7 +1005,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
-        #endregion shuffler
+        #endregion Shuffler
 
         #region Placement
 
@@ -1275,6 +1381,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private int DelayedBridges(List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
         {
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(", ", outgoing));
+
             var result = 0;
             if (outgoing.Count == 0 || desired.Count == 0) goto finish;
 
@@ -1309,17 +1417,39 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
-        private void FinalizeNetwork(List<ImmutableList<int>> domainsList)
+        private bool FinalizeNetwork(Dictionary<int,ImmutableList<int>> domainsList)
         {
+            string level = MethodBase.GetCurrentMethod().Name;
+            bool result = false;
+            var allTerritories = territories.Values.ToList();
             foreach (var territory in territories.Values)
             {
                 territory.SetUpConnections();
             }
-            StitchNetwork(FindNetworks(territories.Values.ToList()));
+            if (StitchNetwork(FindNetworks(allTerritories)))
+            {
+                _ = Toolbox.LogAsync(level, "First pass was succesful: the network is whole!");
+                result = true;
+            }
+            else
+            {
+                _ = Toolbox.LogAsync(level, "WARNING: First pass has failed: we couldn't put the network back together! It all depends on the individual domains now...");
+            }
+            int count = 0;
             foreach (var set in domainsList)
             {
-                StitchNetwork(FindNetworks(set.Select(x => territories[x]).ToList()), gateMaxDist * IntraDomainsDistFactor);
+                count++;
+                var lists = FindNetworks(set.Value.Select(x => territories[x]).ToList());
+                if (StitchNetwork(lists, gateMaxDist * IntraDomainsDistFactor))
+                {
+                    _ = Toolbox.LogAsync(level, $"{(lists.Count == 1 ? "No additional connections needed" : "Additional connections were achieved")} for domain #{set.Key}.");
+                }
+                else
+                {
+                    _ = Toolbox.LogAsync(level, $"No additional connections were made for domain #{set.Key}.");
+                }
             }
+            return result || FindNetworks(allTerritories).Count == 1;
         }
 
         private (Cluster from, Cluster to) FindBridge(HashSet<Cluster> outgoingHash, List<Cluster> desired, out bool flag, float limit = -1f, Predicate<(Cluster, Cluster)> filter = null)
@@ -1360,26 +1490,43 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             };
 
             Toolbox.FlexFloodProcessor(territories, SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
+            var count = groups.Count;
 
             //logging
-            int count = groups.Count;
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count > 1 ? $"{count} groups" : "only one group")} out of {territories.Count} territories.", true);
+            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count > 1 ? $"{count} network patches" : "a single network")} from a set of {territories.Count} territories.", true);
 
             return groups;
         }
 
-        private void Reconnect(Territory territory, Direction alsoReachFor, bool firstRun, List<Cluster> orphanedRoads, List<Cluster> secondaryRoads)
+        private void RemoveGatesSelectively(Territory territory, bool isSequence, HashSet<Cluster> outgoing)
+        {
+            foreach (var exit in SanctionedConnections(territory))
+            {
+                outgoing.Add(exit.cluster);
+                var gate = exit.gate;
+                var zone = gate.ParentZone;
+                zone.Gates.Remove(gate);
+            }
+        }
+
+        private IEnumerable<(Cluster cluster, Sector origin, Gate gate, Sector destination)> SanctionedConnections(Territory origin)
+        {
+            if (origin.unconnected || origin.Landlocked) yield break; //spares all gates from isolated territories
+            foreach (var exit in origin.Connections)
+            {
+                //spares gates connecting colonies and toMerge (same DLC / Police) and gates to landlocked territories that were previously skipped
+                if (sequentialDomains.Contains(origin.assignedDomainId) && origin.IsDestinationDomestic(exit.destination) ||
+                    territories[exit.destination.AssignedTerritoryId].Landlocked) continue;
+                yield return exit;
+            }
+        }
+
+        private void Reconnect(Territory territory, Direction alsoReachFor, bool firstRun, bool isSequence, List<Cluster> orphanedRoads, List<Cluster> secondaryRoads)
         {
             HashSet<Cluster> outgoing = [];
             if (territory.ExitGates != null && !territory.isBridge)
             {
-                foreach (var link in territory.Connections)
-                {
-                    outgoing.Add(link.cluster);
-                    var gate = link.gate;
-                    var zone = gate.ParentZone;
-                    zone.Gates.Remove(gate);
-                }
+                RemoveGatesSelectively(territory, isSequence, outgoing);
 
                 bool FindBridgeManagePools(HashSet<Cluster> originCandidates, List<Cluster> destinationsPool, bool removeDestination, out (Cluster from, Cluster to) bridge, Predicate<(Cluster, Cluster)> filter = null)
                 {
@@ -1440,7 +1587,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
             territory.SetUpConnections();
         }
-        private void StitchNetwork(List<List<int>> patches, float limit = -1f)
+
+        private bool StitchNetwork(List<List<int>> patches, float limit = -1f)
         {
             var ordered = patches.OrderBy(x => x.Count());
             Dictionary<int, HashSet<Cluster>> remaining = [];
@@ -1450,7 +1598,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 HashSet<Cluster> outgoing = [];
                 foreach (var idx in group)
                 {
-                    var relevant = territories[idx].Clusters.Where(c => c.PossibleExits.Count > 0);
+                    var relevant = SanctionedConnections(territories[idx])
+                        .Select(x => x.cluster)
+                        .Distinct()
+                        .Where(c => c.PossibleExits.Count > 0);
                     if (relevant.Count() > 0)
                     {
                         foreach (var cluster in relevant)
@@ -1461,6 +1612,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 remaining.Add(i++, outgoing);
             }
+            bool result = false;
             while (remaining.Count > 1) //Last one is the bigger, it's all done once we get there.
             {
                 var entry = remaining.First();
@@ -1471,13 +1623,21 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 if (bridged)
                 {
                     _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Stitched {bridge.from} with {bridge.to}.");
+                    result = true;
                 }
                 else
                 {
                     _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ", outHash)}" : "ERROR: Failed stitching!");
                 }
             }
+            return result;
         }
         #endregion Reconnections
+    }
+
+    internal class StagedSet
+    {
+        public List<int> Territories { get; set; } = [];
+        public bool IsSequential { get; set; }
     }
 }

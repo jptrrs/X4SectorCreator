@@ -89,9 +89,10 @@ namespace X4SectorCreator.Objects
                 cluster.ExitPoints = ClusterManager.PickDestinationsFromCluster(cluster, c => c != cluster);
                 foreach (var exit in cluster.ExitPoints.Where(x => x.destination.AssignedTerritoryId != id))
                 {
+                    var destination = exit.destination.AssignedTerritoryId;
                     connections.Add((cluster, exit.origin, exit.gate, exit.destination));
                     bordering.AddUnique(cluster);
-                    neighbors.Add(exit.destination.AssignedTerritoryId);
+                    neighbors.Add(destination);
                 }
             }
             if (connections.Count == 0) unconnected = Clusters.All(c => c.PossibleExits.Count == 0);
@@ -161,6 +162,11 @@ namespace X4SectorCreator.Objects
             }
         }
 
+        internal void UpdateLandlockedStatus()
+        {
+            landlocked = Connections.Count > 0 && Connections.All(x => IsDestinationDomestic(x.destination));
+        }
+
         internal string Reposition(Point displacement)
         {
             Anchor = Anchor.Add(displacement);
@@ -215,6 +221,11 @@ namespace X4SectorCreator.Objects
             }
         }
 
+        internal bool IsDestinationDomestic(Sector destination)
+        {
+            return peers.Contains(destination.AssignedTerritoryId);
+        }
+
         internal void SetUpDirection(bool restricted = false)
         {
             if (size.IsEmpty) SetUpBox();
@@ -230,7 +241,7 @@ namespace X4SectorCreator.Objects
             int voteLeft = 0;
             List<Cluster> accountedFor = [];
             //Unless restricted, take into account only clusters connected to outside of the domain.
-            var relevant = peers.Count > 0 ? bordering.Where(c => c.Destinations.Any(s => peers.Contains(s.AssignedTerritoryId) == restricted)) : bordering;
+            var relevant = peers.Count > 0 ? bordering.Where(c => c.Destinations.Any(s => IsDestinationDomestic(s) == restricted)) : bordering;
             foreach (var c in relevant)
             {
                 //localized results
@@ -249,7 +260,7 @@ namespace X4SectorCreator.Objects
                 //The more destinations from a cluster, bigger weight given to this.
                 foreach (var s in c.Destinations)
                 {
-                    if (peers.Contains(s.AssignedTerritoryId) != restricted) continue;
+                    if (IsDestinationDomestic(s) != restricted) continue;
                     var d = s.Parent;
                     if (accountedFor.Contains(d)) continue; //so we don't double-count
                     if (c.Position.X < d.Position.X) cVoteRight++;
