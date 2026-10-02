@@ -13,6 +13,24 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
     {
         #region Header
 
+        // Configuration
+        internal bool
+            FreezeMode = false, //For territories that must have their positions preserved, this will merge them into one instead of trying to replicate their sequence. If turned on, the size of those merged teritories causes the map to be less predictable and have wider gaps.
+            AllowRotating = false; //Currently, rotating territories doesn't actually rotate the gates, because we have no effect over their positions once exported to XML. So, turning this on will cause connection lines to be all over the place.
+
+        // To Do:
+        // A gradient of shuffle intensity:
+        // 0. Total shuffle. (maybe also clear vanilla territory ownerships?)
+        // 1. Clusters that are clumped together are grouped into larger territories. (CarveTerritories)
+        // 2. Keep together territories that belong to the same owner (FindAnnexed), with various criteria, and preserve internal connections:
+        // 2a. Only DLC territories are kept together (ShouldMergeByDLC, FindCloseColonies);
+        // 2b. Also include subordinate factions: Riptide (ShouldMergeByPolice), Hatikvah and Pioneers (IsVassal);
+        // 2c. Also include predetermined neutral territories for the sake of narrative, like Heretic's End - Watchful Gaze and Getsu Fune (ArePredeterminedClusterPair);
+        // 2d. Do the same for vanilla factions (SharedOwner);
+        // 2e. Also maintain proximity of factions that share a border in vanilla, like the Paranid and Holy Order (ArePredeterminedNeighbors);
+        // 3. Spread the Xenon clusters out.
+
+
         private const int gap = 1;
 
         private static readonly (int x, int y)[] NeighborOffsets =
@@ -33,7 +51,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private static Dictionary<string, string> policeFactions = [];
 
         private readonly Func<Territory, Cluster, bool> IsOutside = (territory, cluster) =>
-                {
+        {
             return !territory.Clusters.Contains(cluster);
         };
 
@@ -65,6 +83,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private Point occupiedMax;
         private HashSet<int> sequentialDomains = [];
         private Dictionary<int, Territory> territories = [];
+
         internal Shuffler(IEnumerable<Cluster> clusters)
         {
             // Gather some basic info
@@ -184,6 +203,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var targetOwner = destination.CurrentOwner.ToLower();
             return PoliceFactions.ContainsKey(targetOwner) && owner.Equals(PoliceFactions[targetOwner]);
         }
+
         private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
             Action<Cluster, bool> SortTerritory = (cluster, reset) =>
@@ -230,16 +250,19 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Build groups by merging any overlapping sets into larger ones.
             List<HashSet<int>> groups = MergeOverlappingDomains();
 
-            // filter out and merge the domains that ask for it.
-            //List<HashSet<int>> groupsLeft = MergeAndFilterOutDomains(groups);
+            if (FreezeMode)
+            {
+                // filter out and merge the domains that ask for it.
+               groups = MergeAndFilterOutDomains(groups);
+            }
 
             // rebuild the dictionary so each entry is a consolidated domain.
             Dictionary<int, List<int>> consolidated = [];
             int idx = 0;
-            foreach (var g in groups/*groupsLeft*/)
+            foreach (var g in groups)
             {
                 idx++;
-                consolidated.Add(idx, /*g.OrderBy(x => Random.Shared.Next()).ToList()*/SequencedDomainFromHash(idx, g));
+                consolidated.Add(idx, SequencedDomainFromHash(idx, g));
             }
             domains = DesignatedDomains(consolidated);
             SequencesFinalOrder();
@@ -337,25 +360,25 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     .ToList();
                 if (!connected.Any()) continue;
                 //merge only if only one set of owned territories is being bridged
-                //bool toMerge = connected.Count == 1;
+                bool toMerge = FreezeMode && connected.Count == 1;
                 foreach (var grouped in connected)
                 {
                     var bridge = territories[cluster.AssignedTerritoryId];
                     bridge.isBridge = true;
-                    //bridge.toMerge = toMerge;
+                    bridge.toMerge = toMerge;
                     bridge.closeColonyIds.AddRangeUnique(grouped.Select(x => x.id));
                     foreach (var neighbor in grouped)
                     {
-                        //if (toMerge)
-                        //{
-                        //    neighbor.toMerge = true;
-                        //}
-                        //else
-                        //{
+                        if (toMerge)
+                        {
+                            neighbor.toMerge = true;
+                        }
+                        else
+                        {
                             neighbor.closeColonyIds.AddRangeUnique(grouped.Except([neighbor]).Select(x => x.id));
                             neighbor.closeColonyIds.Add(bridge.id);
                             neighbor.SetUpConnections();
-                        //}
+                        }
                     }
                     var bridged = grouped.Select(x => x.id).ToList();
                     cluster.BridgeFor.AddRange(bridged);
@@ -610,15 +633,15 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
 
                 //Rotate it as needed.
-                //if (direction != Direction.Undefined && territory.exitDirection != Direction.Undefined)
-                //{
-                //    var entryDirection = territory.exitDirection.OppositeDir();
-                //    if (entryDirection != direction)
-                //    {
-                //        var turns = entryDirection.ClockwiseStepsTo(direction);
-                //        territory.Rotate(turns);
-                //    }
-                //}
+                if (AllowRotating && direction != Direction.Undefined && territory.exitDirection != Direction.Undefined)
+                {
+                    var entryDirection = territory.exitDirection.OppositeDir();
+                    if (entryDirection != direction)
+                    {
+                        var turns = entryDirection.ClockwiseStepsTo(direction);
+                        territory.Rotate(turns);
+                    }
+                }
 
                 //Fine-tune the insertion spot so it fits right in.
                 var currentPos = territory.Anchor;
