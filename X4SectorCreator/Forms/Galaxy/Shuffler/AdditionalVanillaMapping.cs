@@ -24,7 +24,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private static Dictionary<string, string> vanillaPoliceCached;
 
-        public static Dictionary<string, string> GetDefaultPolice()
+        internal const string XenonName = "xenon";
+
+        internal static Dictionary<string, string> GetDefaultPolice()
         {
             if (vanillaPoliceCached != null) return vanillaPoliceCached;
             string policeJson = File.ReadAllText(Constants.DataPaths.VanillaPoliceFactionsMappingFilePath);

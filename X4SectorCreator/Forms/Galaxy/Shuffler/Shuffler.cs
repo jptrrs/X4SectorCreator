@@ -6,11 +6,14 @@ using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgorithms;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
+using static X4SectorCreator.Forms.Galaxy.Shuffler.AdditionalVanillaMapping;
+using static X4SectorCreator.Helpers.Toolbox;
 
 namespace X4SectorCreator.Forms.Galaxy.Shuffler
 {
     internal class Shuffler
     {
+
         #region Header
 
         // Configuration
@@ -88,7 +91,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             // Gather some basic info
             hexGridFrame = ClusterManager.FrameHexGrid(clusters.ToList());
-            _ = Toolbox.LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}", true);
+            _ = LogAsync("Initializing", $"cols = {hexGridFrame.cols} x rows = {hexGridFrame.rows}", true);
 
             // Group clusters into territories based adjacency and DLCs
             CarveTerritories(clusters);
@@ -129,7 +132,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     {
                         policeFactions = FactionsForm.AllCustomFactions.ToDictionary(f => f.Key, f => f.Value.PoliceFaction);
                     }
-                    foreach (var faction in AdditionalVanillaMapping.GetDefaultPolice().Where(x => !x.Value.Equals("none", StringComparison.OrdinalIgnoreCase)))
+                    foreach (var faction in GetDefaultPolice().Where(x => !x.Value.Equals("none", StringComparison.OrdinalIgnoreCase)))
                     {
                         policeFactions[faction.Key] = faction.Value;
                     }
@@ -158,22 +161,22 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             var subjectName = subject.Name;
             var targetName = target.Name;
-            bool flag = (AdditionalVanillaMapping.ObligateClusterPairs.ContainsKey(subjectName) &&
-                AdditionalVanillaMapping.ObligateClusterPairs[subjectName] == targetName) ||(AdditionalVanillaMapping.ObligateClusterPairs.ContainsValue(subjectName) &&
-                AdditionalVanillaMapping.ObligateClusterPairs.ReverseLookup(subjectName).First() == targetName);
+            bool flag = (ObligateClusterPairs.ContainsKey(subjectName) &&
+                ObligateClusterPairs[subjectName] == targetName) ||(ObligateClusterPairs.ContainsValue(subjectName) &&
+                ObligateClusterPairs.ReverseLookup(subjectName).First() == targetName);
             return flag;
         }
 
         private static bool ArePredeterminedNeighbors(string owner, string targetOwner)
         {
-            return AdditionalVanillaMapping.ObligateNeighborFactions.ContainsKey(owner) &&
-            AdditionalVanillaMapping.ObligateNeighborFactions[owner] == targetOwner;
+            return ObligateNeighborFactions.ContainsKey(owner) &&
+            ObligateNeighborFactions[owner] == targetOwner;
         }
 
         private static bool IsVassal(string owner, string targetOwner)
         {
-            return AdditionalVanillaMapping.VassalFactions.ContainsKey(owner) &&
-            AdditionalVanillaMapping.VassalFactions[owner] == targetOwner;
+            return VassalFactions.ContainsKey(owner) &&
+            VassalFactions[owner] == targetOwner;
         }
 
         private static bool KeepSequence(List<Territory> set)
@@ -184,7 +187,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private static bool SharedOwner(string owner, string targetOwner)
         {
-            return !owner.Equals("none") && !targetOwner.Equals("none") && owner.Equals(targetOwner);
+            return !owner.Equals("none", StringComparison.OrdinalIgnoreCase) && 
+                !targetOwner.Equals("none", StringComparison.OrdinalIgnoreCase) && 
+                owner.Equals(targetOwner);
         }
 
         private static bool ShouldMergeByDLC(Territory selected, Territory target)
@@ -194,6 +199,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 selected.dlc.Equals(target.dlc, StringComparison.OrdinalIgnoreCase) &&
                 selected.SameOwner &&
                 target.SameOwner;
+        }
+
+        private static bool SameDLC(Cluster selected, Cluster target)
+        {
+            return !string.IsNullOrWhiteSpace(selected.Dlc) &&
+                !string.IsNullOrWhiteSpace(target.Dlc) &&
+                selected.Dlc.Equals(target.Dlc, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool ShouldMergeByPolice(Sector origin, Sector destination)
@@ -206,10 +218,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private void CarveTerritories(IEnumerable<Cluster> clusters)
         {
+            bool amIXenon = false;
+
             Action<Cluster, bool> SortTerritory = (cluster, reset) =>
             {
                 if (reset)
                 {
+                    var owner = cluster.GetOwnerShip();
+                    amIXenon = !string.IsNullOrEmpty(owner) && owner.Equals(XenonName, StringComparison.OrdinalIgnoreCase);
                     var newTerritory = new Territory(cluster, territories.Count);
                     territories.Add(newTerritory.id, newTerritory);
                     cluster.AssignedTerritoryId = newTerritory.id;
@@ -277,7 +293,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             SequencesFinalOrder();
 
             // logging
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
         }
 
         private Dictionary<int, List<int>> DesignatedDomains(Dictionary<int, List<int>> set)
@@ -362,7 +378,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var cluster in candidates)
             {
                 var connected = cluster.Destinations
-                    .Where(s => !s.IsNeutral && !s.CurrentOwner.Equals("Xenon", StringComparison.OrdinalIgnoreCase))
+                    .Where(s => !s.IsNeutral && !s.CurrentOwner.Equals(XenonName, StringComparison.OrdinalIgnoreCase))
                     .GroupBy(s => s.CurrentOwner)
                     .Where(g => g.Count() > 1)
                     .Select(g => g.Select(s => territories[s.AssignedTerritoryId]).ToList())
@@ -485,7 +501,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             territory.closeColonyIds.Clear();
             List<string> absorbedReport = absorbed.Select(x => $"#{x}({territories[x].seed.Name})").ToList();
             string separator = absorbed.Count() == 2 ? " and " : ", ";
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{string.Join(separator, absorbedReport)} merged into #{territory.id}({territory.seed.Name})");
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"{string.Join(separator, absorbedReport)} merged into #{territory.id}({territory.seed.Name})");
             foreach (var i in absorbed)
             {
                 territories.Remove(i);
@@ -508,7 +524,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 return crowd.Where(x => entry.Intersect(x).Any());
             };
 
-            Toolbox.FlexFloodProcessor(domains.Values.Select(e => e.ToHashSet()).ToList(), MergeDomains, GetIntersecting);
+            FlexFloodProcessor(domains.Values.Select(e => e.ToHashSet()).ToList(), MergeDomains, GetIntersecting);
             return mergedGroups;
         }
 
@@ -553,7 +569,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 if (t.closeColonyIds.Count > 0) log.Append($"; colonies {string.Join(", ", t.closeColonyIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
                 log.AppendLine(".");
             }
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString());
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString());
         }
         #endregion Territories
 
@@ -563,7 +579,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             //logging
             string level = MethodBase.GetCurrentMethod().Name;
-            _ = Toolbox.LogAsync(level, $"\n\n--- Shuffling ---", true);
+            _ = LogAsync(level, $"\n\n--- Shuffling ---", true);
 
             //No turning back now!
             MainForm.Instance.AllClusters.Clear();
@@ -601,7 +617,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     {
                         if (skipTracker > 0)
                         {
-                            _ = Toolbox.LogAsync(level, $"We've run out of domains before all staged were distributed. {skipTracker} slots were skipped while looking for the next viable one.", true);
+                            _ = LogAsync(level, $"We've run out of domains before all staged were distributed. {skipTracker} slots were skipped while looking for the next viable one.", true);
                         }
                         break;
                     }
@@ -613,12 +629,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                             //refresh slots queue and switch to plan B.
                             slots = deferred;
                             inBounds = false;
-                            _ = Toolbox.LogAsync(level, $"Bounds reached, spilling over!", true);
+                            _ = LogAsync(level, $"Bounds reached, spilling over!", true);
                         }
                         else
                         {
                             //end of the line
-                            _ = Toolbox.LogAsync(level, $"ERROR: we've run out of slots! Staged domains left out: {string.Join(", ", staged.Select(x => $"\n#{x.Key} [{string.Join(", ", x.Value.Territories)}]"))}");
+                            _ = LogAsync(level, $"ERROR: we've run out of slots! Staged domains left out: {string.Join(", ", staged.Select(x => $"\n#{x.Key} [{string.Join(", ", x.Value.Territories)}]"))}");
                         }
                     }
                 }
@@ -630,14 +646,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 bool valid = TryGetTerritory(out var territory, out var isSequence, out var position, out var direction, out var branch, out var path);
 
                 //Reporting territory selection
-                _ = Toolbox.LogAsync(level, $"Step {i}, branch {branch}, slot @ {position.ToTuple()}/{direction}/{path}", true);
+                _ = LogAsync(level, $"Step {i}, branch {branch}, slot @ {position.ToTuple()}/{direction}/{path}", true);
                 if (valid)
                 {
-                    _ = Toolbox.LogAsync(level, $"Assigning #{territory.id} - {territory.seed.Name}, size={territory.size.ToTuple()},{territory.Clusters.Count} clusters");
+                    _ = LogAsync(level, $"Assigning #{territory.id} - {territory.seed.Name}, size={territory.size.ToTuple()},{territory.Clusters.Count} clusters");
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(level, $"ERROR: we've run out of territories to assign to slots!");
+                    _ = LogAsync(level, $"ERROR: we've run out of territories to assign to slots!");
                     break;
                 }
 
@@ -663,7 +679,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 //Move the piece
                 var move = position.Subtract(currentPos);
                 var report = territory.Reposition(move);
-                _ = Toolbox.LogAsync(level, report);
+                _ = LogAsync(level, report);
 
                 //Keep track of occupied areas
                 var covered = territory.Contour;
@@ -676,7 +692,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var cMinY = covered.MinBy(p => p.Y).Y;
                 var cMaxX = covered.MaxBy(p => p.X).X;
                 var cMinX = covered.MinBy(p => p.X).X;
-                _ = Toolbox.LogAsync(level,
+                _ = LogAsync(level,
                     $"{covered.Count} tiles were covered, {cMinX} to {cMaxX} horizontal, {cMinY} to {cMaxY} vertical, totalling {occupied.Count} now.");
 
                 //Update the board.
@@ -701,16 +717,16 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             HandleMisplaced(misplaced);
             orphanedRoads.RemoveAll(x => x.PossibleExits.Count == 0);
             var delayed = DelayedBridges(orphanedRoads, secondaryRoads);
-            _ = Toolbox.LogAsync(level, (delayed > 0 ?
+            _ = LogAsync(level, (delayed > 0 ?
                 $"{delayed} more gate connections were made for territories that ended up isolated." : "No isolated territories after shuffling.")
                 + " The network will now be stitched together...", true);
             if (FinalizeNetwork(domainsList))
             {
-                _ = Toolbox.LogAsync(level, $"Gate Network reestabilished. Galaxy shuffle complete.", true);
+                _ = LogAsync(level, $"Gate Network reestabilished. Galaxy shuffle complete.", true);
             }
             else
             {
-                _ = Toolbox.LogAsync(level, $"ERROR: Shuffle procedure ended, but the gate network is still fragmented!", true);
+                _ = LogAsync(level, $"ERROR: Shuffle procedure ended, but the gate network is still fragmented!", true);
             }
         }
 
@@ -740,7 +756,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         log.Append($"ERROR: failure to push it aside. We couldn't place it anywhere! Last attempt: {c.Position.ToTuple()}.");
                     }
                 }
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString(), true);
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name, log.ToString(), true);
             }
         }
 
@@ -835,7 +851,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {branch})");
+                    _ = LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {branch})");
                 }
             }
 
@@ -862,9 +878,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             if (slots.Count() == 0)
             {
-                _ = Toolbox.LogAsync(level, $"No Slots found for #{territory.id}! Branch: {branch})");
+                _ = LogAsync(level, $"No Slots found for #{territory.id}! Branch: {branch})");
             }
-            _ = Toolbox.LogAsync(level, $"Slots around #{territory.id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
+            _ = LogAsync(level, $"Slots around #{territory.id}: {string.Join(", ", log)} (branch: {branch}, gen: {helixGeneration}).");
 
             return slots.ToList();
         }
@@ -880,7 +896,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             else if (stagedRemain && staged.Values.All(x => x.Territories.Count == 0))
             {
                 //Bail out if something hasn't been intialized or the lists have been exausted.
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name,
                     $"ERROR: all staged domains were empty!");
                 return null;
             }
@@ -933,7 +949,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     }
                     else report.Append("on the same branch");
                     report.Append($" from {path}.");
-                    //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: sequences for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",",x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}",true);
+                    //_ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: sequences for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",",x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}",true);
                 }
             }
 
@@ -962,12 +978,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     //Guaranteee there's a valid staged set after this. Note: double lookup is strictly necessary 
                     if (!staged.TryGetValue(branch, out baseSet) || baseSet.Territories.Count == 0)
                     {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name,
                             $"ERROR: unable to find a valid domain set in the staged collection.");
                         return null;
                     }
                 }
-                report.Append($"Picking from a new set for branch {branch}.");
+                report.Append($"Picking set {branch} for a new branch .");
             }
 
             var selected = staged[branch];
@@ -977,7 +993,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             report.Append($" Selected: {card}");
             if (selected.Territories.Count > 0) report.Append($" (remaining: [{string.Join(", ", selected.Territories)}])");
             else staged.Remove(branch);
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, report.ToString() + ".", true);
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, report.ToString() + ".", true);
             return territories[card];
         }
 
@@ -1004,7 +1020,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var set = domains.Random();
             if (set.Value == null)
             {
-                _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+                _ = LogAsync(MethodBase.GetCurrentMethod().Name,
                     $"ERROR: selected domain has a null list! Looking for branch {branch}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
             }
             bool isSequential = sequentialDomains.Contains(set.Key);
@@ -1020,7 +1036,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 staged[branch] = new StagedSet { Territories = set.Value, IsSequential = isSequential };
             }
             domains.Remove(set.Key);
-            //_ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name,
+            //_ = LogAsync(MethodBase.GetCurrentMethod().Name,
             //    $"New domain drafted: [{string.Join(", ", set.Value)}].{(isSequential ? " It's a sequence!":"")} Loaded to branch {branch}.", true);
             return branch;
         }
@@ -1031,7 +1047,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 if (!MainForm.Instance.AllClusters.TryAdd(c.Position.ToTuple(), c))
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing {c.Name} @ {c.Position.ToTuple()}, set aside...");
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing {c.Name} @ {c.Position.ToTuple()}, set aside...");
                     misplaced.Add(c);
                 }
             }
@@ -1138,15 +1154,15 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 if (adjust.IsEmpty)
                 {
                     //This means this slot was boxed in! Last attempt to place it...
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.id}: there wasn't enough space for it! Attempting a forced push...");
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Error placing #{territory.id}: there wasn't enough space for it! Attempting a forced push...");
                     if (!TryToPushAround(offset, branch, dir, occupied, width, height, 20, ref adjust))
                     {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...still couldn't place it over the next 20 tiles! Giving up.");
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"...still couldn't place it over the next 20 tiles! Giving up.");
                         return offset;
                     }
                     else
                     {
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it by {adjust.ToTuple()}.");
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"...moved it by {adjust.ToTuple()}.");
                     }
                 }
                 //Move to avoid overlaps...
@@ -1183,7 +1199,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             if (drifted) report.Add($"drifted by {drift.ToTuple()}");
             if (bang) report.Add(collisionReport);
             if (attracted) report.Add($"moved to fill the gap by {adjust.ToTuple()}");
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(" -> ", report) + ".");
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(" -> ", report) + ".");
 
             return result;
         }
@@ -1222,7 +1238,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             //Probe X and push it if preferred
             if (Math.Abs(pushX) > 0)
             {
-                var hitsX = Toolbox.Spread(width, height, coord => new Point(hexPos.X + pushX + coord.a, hexPos.Y - coord.b), p => occupied.Contains(p)).ToList();
+                var hitsX = Spread(width, height, coord => new Point(hexPos.X + pushX + coord.a, hexPos.Y - coord.b), p => occupied.Contains(p)).ToList();
                 viableX = !hitsX.Any();
             }
             if (viableX && (preferredDir == Direction.Right || preferredDir == Direction.Left)) goto pushX;
@@ -1230,7 +1246,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             //Probe Y and push it if preferred
             if (Math.Abs(pushY) > 0)
             {
-                var hitsY = Toolbox.Spread(width, height, coord => new Point(hexPos.X + coord.a, hexPos.Y + pushY - coord.b), p => occupied.Contains(p)).ToList();
+                var hitsY = Spread(width, height, coord => new Point(hexPos.X + coord.a, hexPos.Y + pushY - coord.b), p => occupied.Contains(p)).ToList();
                 viableY = !hitsY.Any();
             }
             if (viableY && (preferredDir == Direction.Up || preferredDir == Direction.Down)) goto pushY;
@@ -1356,7 +1372,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private List<Point> ScanForCollisions(SortedSet<cPoint> occupied, Point position, int width, int height)
         {
-            return Toolbox.Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)).ToList();
+            return Spread(width, height, coord => new Point(position.X + coord.a, position.Y - coord.b), p => occupied.Contains(p)).ToList();
         }
 
         private bool SimpleCollision(SortedSet<cPoint> occupied, Point position, int width, int height)
@@ -1413,7 +1429,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private int DelayedBridges(List<Cluster> outgoing, List<Cluster> desired, float limit = -1f)
         {
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(", ", outgoing));
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, string.Join(", ", outgoing));
 
             var result = 0;
             if (outgoing.Count == 0 || desired.Count == 0) goto finish;
@@ -1460,12 +1476,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             if (StitchNetwork(FindNetworks(allTerritories)))
             {
-                _ = Toolbox.LogAsync(level, "First pass was succesful: the network is whole!");
+                _ = LogAsync(level, "First pass was succesful: the network is whole!");
                 result = true;
             }
             else
             {
-                _ = Toolbox.LogAsync(level, "WARNING: First pass has failed: we couldn't put the network back together! It all depends on the individual domains now...");
+                _ = LogAsync(level, "WARNING: First pass has failed: we couldn't put the network back together! It all depends on the individual domains now...");
             }
             int count = 0;
             foreach (var set in domainsList)
@@ -1474,11 +1490,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var lists = FindNetworks(set.Value.Select(x => territories[x]).ToList());
                 if (StitchNetwork(lists, gateMaxDist * IntraDomainsDistFactor))
                 {
-                    _ = Toolbox.LogAsync(level, $"{(lists.Count == 1 ? "No additional connections needed" : "Additional connections were achieved")} for domain #{set.Key}.");
+                    _ = LogAsync(level, $"{(lists.Count == 1 ? "No additional connections needed" : "Additional connections were achieved")} for domain #{set.Key}.");
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(level, $"No additional connections were made for domain #{set.Key}.");
+                    _ = LogAsync(level, $"No additional connections were made for domain #{set.Key}.");
                 }
             }
             return result || FindNetworks(allTerritories).Count == 1;
@@ -1521,11 +1537,11 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 return crowd.Where(x => subject.neighbors.Contains(x.id));
             };
 
-            Toolbox.FlexFloodProcessor(territories, SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
+            FlexFloodProcessor(territories, SortGroup, GetConnected, x => groups.Last().Intersect(x.neighbors).Any());
             var count = groups.Count;
 
             //logging
-            _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count > 1 ? $"{count} network patches" : "a single network")} from a set of {territories.Count} territories.", true);
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Found {(count > 1 ? $"{count} network patches" : "a single network")} from a set of {territories.Count} territories.", true);
 
             return groups;
         }
@@ -1592,7 +1608,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         connected = FindBridgeManagePools(outgoing, secondaryRoads, false, out bridge);
                     }
                     if (connected) territoryConnected = bridge.to.AssignedTerritoryId;
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reconnect {territory.seed.Name}: {(connected ? $"SUCESS! Connected to {bridge.to}" : $"FAILED! Outgoing clusters: {outgoing.Count()}")}.");
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reconnect {territory.seed.Name}: {(connected ? $"SUCESS! Connected to {bridge.to}" : $"FAILED! Outgoing clusters: {outgoing.Count()}")}.");
                 }
 
                 if (outgoing.Count > 0 && alsoReachFor != Direction.Undefined)
@@ -1609,7 +1625,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                                 reachedAcross = FindBridgeManagePools(outgoingSub, secondarySub, false, out bridgeAcross, pair => CanConnectFromDirection(pair, alsoReachFor));
                             }
                         }
-                        _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reach {alsoReachFor} from {territory.seed.Name}: {(reachedAcross ? $"SUCESS! Connected to {bridgeAcross.to}" : $"FAILED! Outgoing clusters: {outgoingSub.Count()}")}.");
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reach {alsoReachFor} from {territory.seed.Name}: {(reachedAcross ? $"SUCESS! Connected to {bridgeAcross.to}" : $"FAILED! Outgoing clusters: {outgoingSub.Count()}")}.");
                     }
                 }
 
@@ -1654,12 +1670,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 remaining.Remove(entry.Key);
                 if (bridged)
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"Stitched {bridge.from} with {bridge.to}.");
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Stitched {bridge.from} with {bridge.to}.");
+                    territories[bridge.from.AssignedTerritoryId].SetUpConnections();
+                    territories[bridge.to.AssignedTerritoryId].SetUpConnections();
                     result = true;
                 }
                 else
                 {
-                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ", outHash)}" : "ERROR: Failed stitching!");
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ", outHash)}" : "ERROR: Failed stitching!");
                 }
             }
             return result;
