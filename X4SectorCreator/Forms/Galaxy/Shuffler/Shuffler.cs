@@ -228,6 +228,15 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 return crowd.Where(cluster => targetPositions.Contains(cluster.Position));
             };
 
+            Func<Cluster, bool> NoXenon = cluster =>
+            {
+                //Except from DLCs
+                if (!string.IsNullOrEmpty(cluster.Dlc)) return true;
+                var owner = cluster.GetOwnerShip();
+                bool flag = !string.IsNullOrEmpty(owner) && owner.Equals(XenonName, StringComparison.OrdinalIgnoreCase);
+                return amIXenon ? flag : !flag;
+            };
+
             Func<(Cluster, Cluster), bool> AreConnected = (pair) =>
             {
                 bool flag = false;
@@ -242,7 +251,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             };
 
             var ordered = clusters.OrderBy(x => x.Position.DistanceSquaredOnHexGrid(Point.Empty)).ToList();
-            Toolbox.FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, null, x => AreConnected(x));
+            FlexFloodProcessor(ordered, SortTerritory, GetNeighbors, x => NoXenon(x), x => AreConnected(x));
         }
 
         private void ConsolidateDomains()
