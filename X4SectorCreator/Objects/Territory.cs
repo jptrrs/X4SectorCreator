@@ -19,7 +19,7 @@ namespace X4SectorCreator.Objects
         internal HashSet<int> neighbors = [];
         
         private int[] box = new int[4];
-        private bool? isNeutral, isVanilla, sameOwner, landlocked;
+        private bool? isNeutral, isVanilla, sameOwner, landlocked, isXenon;
         private bool overhead = false;
         private Point anchor = Point.Empty;
         private (double x, double y) center;
@@ -143,12 +143,16 @@ namespace X4SectorCreator.Objects
                         ownerships.Add(owner.ToLower());
                     }
                     bool allSameOwner = ownerships != null && ownerships.Count == 1;
-                    bool xenonInvading = !allSameOwner && ownerships.Count == 2 && ownerships.Contains("xenon");
+                    bool anyXenon = ownerships.Contains(AdditionalVanillaMapping.XenonName);
+                    bool xenonInvading = anyXenon && !allSameOwner && ownerships.Count == 2;
                     sameOwner = allSameOwner || xenonInvading;
+                    isXenon = anyXenon && allSameOwner;
                 }
                 return (bool)sameOwner;
             }
         }
+
+        internal bool IsXenon => SameOwner && isXenon == true;
 
         internal bool Landlocked
         {

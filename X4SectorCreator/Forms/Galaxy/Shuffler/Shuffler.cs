@@ -84,7 +84,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 };
 
         private Point occupiedMax;
-        private HashSet<int> sequentialDomains = [];
+        private HashSet<int> sequentialDomains = [], xenonDomains = [];
         private Dictionary<int, Territory> territories = [];
 
         internal Shuffler(IEnumerable<Cluster> clusters)
@@ -290,6 +290,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 consolidated.Add(idx, SequencedDomainFromHash(idx, g));
             }
             domains = DesignatedDomains(consolidated);
+            MarkXenonDomains();
             SequencesFinalOrder();
 
             // logging
@@ -555,6 +556,14 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
+        private void MarkXenonDomains()
+        {
+            foreach (var d in domains)
+            {
+                if (d.Value.All(i => territories[i].IsXenon)) xenonDomains.Add(d.Key);
+            }
+        }
+
         private void TerritoriesReport()
         {
             var log = new StringBuilder();
@@ -593,8 +602,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Dictionary<string, string> sequencesInParalelBranches = [];
             List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
             Dictionary<int, ImmutableList<int>> domainsList = domains.Where(x => x.Value.Count > 1).Select(x => (x.Key,x.Value.ToImmutableList())).ToDictionary();
+            Direction lastXenonSeededBranch = Direction.Undefined;
 
-        bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
+            bool TryGetTerritory(out Territory territory, out bool isSequence, out Point pos, out Direction dir, out Direction branch, out string path)
             {
                 bool flag = false;
                 territory = null;
@@ -611,7 +621,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     pos = slot.pos;
                     dir = path.GetDirection();
                     branch = path.GetMainBranch();
-                    territory = PickNextFromStaged(staged, sequencesInParalelBranches, slot.path, ref skipTracker, out isSequence);
+                    territory = PickNextFromStaged(staged, sequencesInParalelBranches, slot.path, ref lastXenonSeededBranch, ref skipTracker, out isSequence);
                     flag = territory != null;
                     if (flag)
                     {
@@ -885,7 +895,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return slots.ToList();
         }
 
-        private Territory PickNextFromStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path, ref int skipTracker, out bool isSequence)
+        private Territory PickNextFromStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path, ref Direction lastXenonSeededBranch, ref int skipTracker, out bool isSequence)
         {
             bool domsRemain = domains.Count > 0, stagedRemain = staged.Count > 0, firstRun = false, foundAny = false;
             isSequence = false;
@@ -973,7 +983,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     }
                     //Otherwise, load another set:
                     //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
-                    branch = RefreshStage(staged, branch, path);
+                    branch = RefreshStage(staged, branch, path, ref lastXenonSeededBranch);
 
                     //Guaranteee there's a valid staged set after this. Note: double lookup is strictly necessary 
                     if (!staged.TryGetValue(branch, out baseSet) || baseSet.Territories.Count == 0)
@@ -1015,14 +1025,18 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
         }
 
-        private string RefreshStage(Dictionary<string, StagedSet> staged, string branch, string path)
+        private string RefreshStage(Dictionary<string, StagedSet> staged, string branch, string path, ref Direction lastXenonSeededBranch)
         {
-            var set = domains.Random();
+            var mainBranch = path.GetMainBranch();
+            bool xenonAllowed = path.Length > 0 && mainBranch != lastXenonSeededBranch;
+            var regular = domains.Where(x => !xenonDomains.Contains(x.Key));
+            var set = (xenonAllowed || regular.Count() == 0) ? domains.Random() : regular.Random();
             if (set.Value == null)
             {
                 _ = LogAsync(MethodBase.GetCurrentMethod().Name,
                     $"ERROR: selected domain has a null list! Looking for branch {branch}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
             }
+            if (xenonDomains.Contains(set.Key)) lastXenonSeededBranch = mainBranch;
             bool isSequential = sequentialDomains.Contains(set.Key);
             if (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path) && isSequential)
             {
