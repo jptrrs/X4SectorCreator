@@ -566,9 +566,31 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             foreach (var set in domains.Where(x => x.Value.Count > 1))
             {
+                //order by owner only makes a difference for some cases.
                 Func<int, int> finalOrder = sequentialDomains.Contains(set.Key) ? (i => i) : (i => Random.Shared.Next());
-                domains[set.Key] = set.Value.OrderBy(i => territories[i].Owner).ThenBy(i => territories[i].Landlocked).ThenBy(finalOrder).ToList();
+                if (SplitOwnerships(set.Value))
+                {
+                    domains[set.Key] = set.Value.OrderBy(i => territories[i].Owner).ThenBy(i => territories[i].Landlocked).ThenBy(finalOrder).ToList();
+                }
+                else
+                {
+                    domains[set.Key] = set.Value.OrderBy(i => territories[i].Landlocked).ThenBy(finalOrder).ToList();
+                }
             }
+        }
+
+        private bool SplitOwnerships(List<int> set)
+        {
+            var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var idx in set)
+            {
+                var territory = territories[idx];
+                if (territory.IsNeutral) continue;
+                var owner = territory.Owner;
+                if (string.IsNullOrEmpty(owner) ) continue;
+                ownerships.Add(owner.ToLower());
+            }
+            return ownerships.Count > 1;
         }
 
         private void MarkXenonDomains()

@@ -136,22 +136,32 @@ namespace X4SectorCreator.Objects
             {
                 if (sameOwner == null)
                 {
-                    var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var cluster in Clusters)
-                    {
-                        var owner = cluster.GetOwnerShip();
-                        if (string.IsNullOrEmpty(owner) || owner.Equals("None")) continue;
-                        ownerships.Add(owner.ToLower());
-                    }
+                    HashSet<string> ownerships = Ownerships();
                     bool allSameOwner = ownerships != null && ownerships.Count == 1;
                     bool anyXenon = ownerships.Contains(AdditionalVanillaMapping.XenonName);
                     bool xenonInvading = anyXenon && !allSameOwner && ownerships.Count == 2;
                     sameOwner = allSameOwner || xenonInvading;
                     isXenon = anyXenon && allSameOwner;
-                    if (allSameOwner && owner == null) owner = ownerships.First();
+                    if (owner == null && (bool)sameOwner)
+                    {
+                        if (xenonInvading) ownerships.Remove(AdditionalVanillaMapping.XenonName);
+                        owner = ownerships.First();
+                    }
                 }
                 return (bool)sameOwner;
             }
+        }
+
+        private HashSet<string> Ownerships()
+        {
+            var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var cluster in Clusters)
+            {
+                var owner = cluster.GetOwnerShip();
+                if (string.IsNullOrEmpty(owner) || owner.Equals("None")) continue;
+                ownerships.Add(owner.ToLower());
+            }
+            return ownerships;
         }
 
         internal bool IsXenon => SameOwner && isXenon == true;
