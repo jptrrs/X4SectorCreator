@@ -934,22 +934,26 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             if (!firstRun)
             {
+
                 //Detect if any of the staged groups fit the current slot:
                 // A. Look into the parallel branch, if any. In that case, the drafted set can't be a sequence (it can only be linear).
-                var closeEnoughAncestor = CloseEnoughToStaged(staged, sequencesInParalelBranches, path);
                 bool setOnParallel = false;
-                string parallelBranch = null;
-                if (closeEnoughAncestor != null && staged.TryGetValue(closeEnoughAncestor, out var parallelSet))
+                string parallelBranch = null, closeEnoughAncestor = null;
+                if (path.GetDirection() != path.GetMainBranch())
                 {
-                    if (parallelSet.Territories.Count > 0)
+                    closeEnoughAncestor  = CloseEnoughToStaged(staged, sequencesInParalelBranches, path);
+                    if (closeEnoughAncestor != null && staged.TryGetValue(closeEnoughAncestor, out var parallelSet))
                     {
-                        setOnParallel = !parallelSet.IsSequential;
-                        parallelBranch = closeEnoughAncestor;
-                    }
-                    else
-                    {
-                        staged.Remove(closeEnoughAncestor);
-                        CleanUpParalelNotes(sequencesInParalelBranches, closeEnoughAncestor);
+                        if (parallelSet.Territories.Count > 0)
+                        {
+                            setOnParallel = !parallelSet.IsSequential;
+                            parallelBranch = closeEnoughAncestor;
+                        }
+                        else
+                        {
+                            staged.Remove(closeEnoughAncestor);
+                            CleanUpParalelNotes(sequencesInParalelBranches, closeEnoughAncestor);
+                        }
                     }
                 }
 
@@ -973,16 +977,17 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 if (foundAny)
                 {
                     report.Append($"Resuming branch {branch} ");
-                    if (setOnParallel)
+                    if (setOnParallel && !setOnDirect)
                     {
                         sequencesInParalelBranches.TryAdd(path, parallelBranch);
                         report.Append("from a parallel line");
                     }
                     else report.Append("down");
                     report.Append($" from {path}.");
+                    //_ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: Found ancestors for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}", true);
                 }
-                //else                     
-                //    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: sequences for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}", true);
+                //else
+                //    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: No ancestors found for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}", true);
             }
 
             //If none of that worked, fall back to whoever is assigned to the base of that branch
