@@ -25,6 +25,7 @@ namespace X4SectorCreator.Objects
         private (double x, double y) center;
         private HashSet<Cluster> exitClusters = [];
         private List<(Cluster cluster, Sector origin, Gate gate, Sector destination)> connections = [];
+        private string owner;
 
         internal Territory(Cluster seed, int lastID)
         {
@@ -147,12 +148,25 @@ namespace X4SectorCreator.Objects
                     bool xenonInvading = anyXenon && !allSameOwner && ownerships.Count == 2;
                     sameOwner = allSameOwner || xenonInvading;
                     isXenon = anyXenon && allSameOwner;
+                    if (allSameOwner && owner == null) owner = ownerships.First();
                 }
                 return (bool)sameOwner;
             }
         }
 
         internal bool IsXenon => SameOwner && isXenon == true;
+
+        internal string Owner
+        {
+            get
+            {
+                if (owner == null)
+                {
+                    _ = SameOwner;
+                }
+                return owner;
+            }
+        }
 
         internal bool Landlocked
         {

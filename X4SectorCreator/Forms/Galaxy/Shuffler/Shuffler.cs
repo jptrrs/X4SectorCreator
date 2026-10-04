@@ -287,11 +287,16 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             foreach (var g in groups)
             {
                 idx++;
-                consolidated.Add(idx, SequencedDomainFromHash(idx, g));
+                consolidated.Add(idx, g.ToList()/*SequencedDomainFromHash(idx, g)*/);
+                if (KeepSequence(g.Select(id => territories[id]).ToList()))
+                {
+                    sequentialDomains.Add(idx);
+                }
             }
             domains = DesignatedDomains(consolidated);
             MarkXenonDomains();
-            SequencesFinalOrder();
+            //SequencesFinalOrder();
+            SetDomainsDrawOrder();
 
             // logging
             _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]{(sequentialDomains.Contains(x.Key) ? "S" : "")}"))}.");
@@ -529,30 +534,40 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return mergedGroups;
         }
 
-        private List<int> SequencedDomainFromHash(int idx, HashSet<int> group)
-        {
-            List<int> result = [];
-            if (KeepSequence(group.Select(id => territories[id]).ToList()))
-            {
-                sequentialDomains.Add(idx); //just note that down for now.
-                result = group.OrderBy(x => x).ToList();
-            }
-            else
-            {
-                result = group.OrderBy(x => Random.Shared.Next()).ToList();
-            }
-            return result;
-        }
+        //private List<int> SequencedDomainFromHash(int idx, HashSet<int> group)
+        //{
+        //    List<int> result = [];
+        //    if (KeepSequence(group.Select(id => territories[id]).ToList()))
+        //    {
+        //        sequentialDomains.Add(idx); //just note that down for now.
+        //        //result = group.OrderBy(x => x).ToList();
+        //        result = group.OrderBy(i => territories[i].Landlocked).ThenBy(i => i).ToList();
+        //    }
+        //    else
+        //    {
+        //        //result = group.OrderBy(x => Random.Shared.Next()).ToList();
+        //        result = group.OrderBy(i => territories[i].Landlocked).ThenBy(x => Random.Shared.Next()).ToList();
+        //    }
+        //    return result;
+        //}
+        //private void SequencesFinalOrder()
+        //{
+        //    foreach (var idx in sequentialDomains)
+        //    {
+        //        var domain = domains[idx];
+        //        if (domain.Where(i => !territories[i].Landlocked).Count() == 1)
+        //        {
+        //            domains[idx] = domain.OrderBy(i => territories[i].Landlocked).ThenBy(i => i).ToList();
+        //        }
+        //    }
+        //}
 
-        private void SequencesFinalOrder()
+        private void SetDomainsDrawOrder()
         {
-            foreach (var idx in sequentialDomains)
+            foreach (var set in domains.Where(x => x.Value.Count > 1))
             {
-                var domain = domains[idx];
-                if (domain.Where(i => !territories[i].Landlocked).Count() == 1)
-                {
-                    domains[idx] = domain.OrderBy(i => territories[i].Landlocked).ThenBy(i => i).ToList();
-                }
+                Func<int, int> finalOrder = sequentialDomains.Contains(set.Key) ? (i => i) : (i => Random.Shared.Next());
+                domains[set.Key] = set.Value.OrderBy(i => territories[i].Owner).ThenBy(i => territories[i].Landlocked).ThenBy(finalOrder).ToList();
             }
         }
 
@@ -570,7 +585,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             log.AppendLine($"\n\n--- Territories ---\n");
             foreach (var t in territories.Values)
             {
-                string ownerName = t.SameOwner ? t.seed.Sectors[0].CurrentOwner : "Divided";
+                string ownerName = t.Owner ?? "Divided"; //t.SameOwner ? t.seed.Sectors[0].CurrentOwner : "Divided";
                 var owner = t.IsNeutral ? "Neutral" : ownerName;
                 log.Append($"#{t.id} - {t.seed.Name}, {owner}: {t.Clusters.Count} clusters, {t.bordering.Count} connecting, facing {t.exitDirection}{(string.IsNullOrEmpty(t.dlc) ? "" : $", dlc: {t.dlc}")}{(PoliceFactions.ContainsKey(owner.ToLower()) ? $", police: {PoliceFactions[owner.ToLower()]}" : "")}");
                 if (t.annexedIds.Count > 0) log.Append($"; annexed to {string.Join(", ", t.annexedIds.Select(x => $"#{territories[x].id}-{territories[x].seed.Name}"))}");
