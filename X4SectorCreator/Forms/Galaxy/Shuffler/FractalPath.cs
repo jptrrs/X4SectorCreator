@@ -24,7 +24,7 @@
         public static string GetParentAddress(this string path)
         {
             if (string.IsNullOrEmpty(path)) return "";
-            if (path.Length == 1) return "0";
+            if (path.Length == 1) return path;
             return path.Substring(0, path.Length - 1);
         }
 
@@ -49,19 +49,17 @@
             return (Direction)firstDigit;
         }
 
-        //unproven. Slot to the left, if branch 1/right. Should work across branches!
+        //Slot to the left, if branch 1/right. Should work across branches!
         public static string GetParalelOlderAddress(this string path)
         {
-            if (string.IsNullOrEmpty(path)) return "";
-            if (path.Length == 1) return "0";
+            if (string.IsNullOrEmpty(path) || path.Length == 1) return "";
             return path.Substring(1);
         }
 
-        //unproven. Slot to the right, if branch 1/right.   
+        //Slot to the right, if branch 1/right.   
         public static string GetParalelNewerAddress(this string path)
         {
-            if (string.IsNullOrEmpty(path)) return "";
-            if (path.Length == 1 && (path[0] - '0') == 0) return "0";
+            if (string.IsNullOrEmpty(path) || path.Length == 1) return "";
             return path[0] + path;
         }
 
