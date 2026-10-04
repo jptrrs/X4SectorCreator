@@ -903,7 +903,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         private Territory PickNextFromStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path, ref Direction lastXenonSeededBranch, ref int skipTracker, out bool isSequence, out bool isResuming)
         {
             bool domsRemain = domains.Count > 0, stagedRemain = staged.Count > 0, firstRun = false, foundAny = false;
-            isResuming = isSequence = false;
+            isResuming = false;
+            isSequence = false;
             string branch = null;
             var report = new StringBuilder();
 
@@ -952,8 +953,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
 
                 //Decide which one to use, if any
-                foundAny = setOnParallel || setOnDirect;
-                branch = parallelBranch ?? directBranch;
+                foundAny = setOnDirect || setOnParallel;
+                branch = directBranch ?? parallelBranch;
                 if (foundAny)
                 {
                     report.Append($"Resuming branch {branch} ");
@@ -978,7 +979,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     //Prevents the domain called at the origin from generating a dead-end entry.
                     branch = "1";
                 }
-                if (!staged.TryGetValue(branch, out var baseSet) || baseSet.Territories.Count <= 0)
+
+                if (!staged.Where(x => x.Key != branch).ToDictionary().TryGetValue(branch, out var baseSet) || baseSet.Territories.Count <= 0)
                 {
                     //There were no groups on stage to draw from, meaning it's time to reset it.
                     //First, if all domains were used already, that's the end.
@@ -1003,9 +1005,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
 
             var selected = staged[branch];
-            var card = selected.Next();
-            isSequence = selected.IsSequential;
             isResuming = selected.Resuming;
+            isSequence = selected.IsSequential;
+            var card = selected.Next();
             report.Append($" Selected: {card}");
             if (selected.Territories.Count > 0) report.Append($" (remaining: [{string.Join(", ", selected.Territories)}])");
             else staged.Remove(branch);
@@ -1044,7 +1046,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             if (xenonDomains.Contains(set.Key)) lastXenonSeededBranch = mainBranch;
             bool isSequential = sequentialDomains.Contains(set.Key);
-            if (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path))
+            if (IsTrunkHoldingSequence(branch) || 
+                (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path)))
             {
                 // Sequential group gets its own branch
                 staged.Add(path, new StagedSet { Territories = set.Value, IsSequential = isSequential });
@@ -1059,6 +1062,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             //_ = LogAsync(MethodBase.GetCurrentMethod().Name,
             //    $"New domain drafted: [{string.Join(", ", set.Value)}].{(isSequential ? " It's a sequence!":"")} Loaded to branch {branch}.", true);
             return branch;
+        }
+
+        private bool IsTrunkHoldingSequence(string branch)
+        {
+            // Meaning trunk branch itself is occupied by a sequence. Detecting this prevents some issues.
+            return branch.Length == 1 && sequentialDomains.Contains(branch[0] - '0');
         }
 
         private void UpdateClusterMap(List<Cluster> clusters, List<Cluster> misplaced)
@@ -1616,10 +1625,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             if (territory.ExitGates != null && !territory.isBridge)
             {
                 RemoveGatesSelectively(territory, outgoing);
-                bool connected = false, reachedAcross = false;
-                int territoryConnected = -1;
                 if (!isSequence || !isResuming)
                 {
+                    bool connected = false, reachedAcross = false;
+                    int territoryConnected = -1;
                     if (!firstRun)
                     {
                         // First, try known & close paths
@@ -1649,13 +1658,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                             _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reach {alsoReachFor} from {territory.seed}: {(reachedAcross ? $"SUCESS! Connected {bridgeAcross.from} to {bridgeAcross.to}" : $"FAILED! Outgoing clusters: {outgoingSub.Count()}")}.");
                         }
                     }
+                    if (connected || reachedAcross) secondaryRoads.AddRange(outgoing);
+                    else orphanedRoads.AddRange(outgoing);
                 }
                 else
                 {
-                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Avoided reconnecting {territory.seed} to avoid redundant gates on a sequence.");
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Avoided reconnecting {territory.seed} to avoid redundant gates on a sequence. (isSequence={isSequence}, isResuming={isResuming})");
                 }
-                if (connected || reachedAcross) secondaryRoads.AddRange(outgoing);
-                else orphanedRoads.AddRange(outgoing);
             }
             if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
             territory.SetUpConnections();
