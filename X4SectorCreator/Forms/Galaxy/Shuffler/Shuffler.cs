@@ -1537,14 +1537,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 count++;
                 var lists = FindNetworks(set.Value.Select(x => territories[x]).ToList());
-                if (StitchNetwork(lists, gateMaxDist * IntraDomainsDistFactor))
-                {
-                    _ = LogAsync(level, $"{(lists.Count == 1 ? "No additional connections needed" : "Additional connections were achieved")} for domain #{set.Key}.");
-                }
-                else
-                {
-                    _ = LogAsync(level, $"No additional connections were made for domain #{set.Key}.");
-                }
+                if (lists.Count > 1) _ = StitchNetwork(lists, gateMaxDist * IntraDomainsDistFactor);
             }
             return result || FindNetworks(allTerritories).Count == 1;
         }
@@ -1714,7 +1707,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 remaining.Add(i++, outgoing);
             }
-            bool result = false;
+            bool result = true;
             while (remaining.Count > 1) //Last one is the bigger, it's all done once we get there.
             {
                 var entry = remaining.First();
@@ -1727,10 +1720,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Stitched {bridge.from} with {bridge.to}.");
                     territories[bridge.from.AssignedTerritoryId].SetUpConnections();
                     territories[bridge.to.AssignedTerritoryId].SetUpConnections();
-                    result = true;
                 }
                 else
                 {
+                    result = false;
                     _ = LogAsync(MethodBase.GetCurrentMethod().Name, limit > 0 ? $"Failed stitching a patch of clusters. Likely because possible connection points were too far apart. Distance was limited to {limit}. Clusters involved: {string.Join(", ", outHash)}" : "ERROR: Failed stitching!");
                 }
             }
