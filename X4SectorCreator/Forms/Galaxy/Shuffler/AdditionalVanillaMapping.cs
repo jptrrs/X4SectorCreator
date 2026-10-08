@@ -8,6 +8,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         internal static Dictionary<string, string> VassalFactions = new(StringComparer.OrdinalIgnoreCase)
         {
             { "hatikvah", "argon" },
+            //{ "antigone", "argon" },
             { "pioneers", "terran" }
         };
 
@@ -20,6 +21,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             { "Heretic's End", "Watchful Gaze" },
             { "Getsu Fune", "Asteroid Belt" }
+            //{ "Mitsuno's Revelation", "Ianamus Zura" }
         };
 
         private static Dictionary<string, string> vanillaPoliceCached;

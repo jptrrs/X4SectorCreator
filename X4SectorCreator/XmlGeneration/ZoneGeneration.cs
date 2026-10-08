@@ -58,6 +58,7 @@ namespace X4SectorCreator.XmlGeneration
             #endregion
         }
 
+        //Add modified zone/gate here???
         private static IEnumerable<(string dlc, XElement element)> GenerateVanillaChanges(VanillaChanges vanillaChanges)
         {
             foreach (RemovedConnection connection in vanillaChanges.RemovedConnections)
@@ -75,6 +76,22 @@ namespace X4SectorCreator.XmlGeneration
 
                 yield return (connection.VanillaCluster.Dlc, new XElement("remove", new XAttribute("sel", $"/macros/macro[@name='{connection.Zone.Name}_macro']/connections/connection[@name='{connectionName}']")));
             }
+
+            foreach (ModifiedZone modifiedZone in vanillaChanges.ModifiedZones)
+            {
+                Zone Old = modifiedZone.Old;
+                Zone New = modifiedZone.New;
+                string connectionName = $"connection_{modifiedZone.Gate.ConnectionName}";
+                yield return (modifiedZone.VanillaCluster.Dlc, new XElement("replace",
+                    new XAttribute("sel", $"/macros/macro[@name='{Old.Name.CapitalizeFirstLetter()}']/connections/connection[@name='{connectionName}']/offset/position/@x"),
+                    New.Position.X
+                    ));
+                yield return (modifiedZone.VanillaCluster.Dlc, new XElement("replace",
+                    new XAttribute("sel", $"/macros/macro[@name='{Old.Name.CapitalizeFirstLetter()}']/connections/connection[@name='{connectionName}']/offset/position/@z"),
+                    New.Position.Y
+                    ));
+            }
+            
         }
 
         private static IEnumerable<XElement> GenerateZones(string modPrefix, List<Cluster> clusters)

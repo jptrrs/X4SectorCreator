@@ -510,15 +510,15 @@ namespace X4SectorCreator
             }
 
             // Screen scaling warning to prevent confusion for some users.
-            using Graphics g = Graphics.FromHwnd(IntPtr.Zero);
-            if (g.DpiX != 96)
-            {
-                int usersDpiSetting = (int)(g.DpiX / 96f * 100);
-                _ = MessageBox.Show($"Dear user, you are using a screen scaling setting of {usersDpiSetting}%\n" +
-                    "The tool is created specifically for 100% screen scaling option.\n" +
-                    "Some UI controls may not be aligned properly, this is very noticable on the sector map.\n" +
-                    "Please change your screen scale setting to 100% to be able to properly use this tool.", "Incompatible DPI warning", MessageBoxButtons.OK);
-            }
+            //using Graphics g = Graphics.FromHwnd(IntPtr.Zero);
+            //if (g.DpiX != 96)
+            //{
+            //    int usersDpiSetting = (int)(g.DpiX / 96f * 100);
+            //    _ = MessageBox.Show($"Dear user, you are using a screen scaling setting of {usersDpiSetting}%\n" +
+            //        "The tool is created specifically for 100% screen scaling option.\n" +
+            //        "Some UI controls may not be aligned properly, this is very noticable on the sector map.\n" +
+            //        "Please change your screen scale setting to 100% to be able to properly use this tool.", "Incompatible DPI warning", MessageBoxButtons.OK);
+            //}
         }
         #endregion
 
@@ -1416,7 +1416,18 @@ namespace X4SectorCreator
                                 });
                                 continue;
                             }
+                            //TEST
+                            else if (matchingZone.Position != nonModifiedZone.Position)
+                            {
+                                vanillaChanges.ModifiedZones.Add(new ModifiedZone {
+                                    VanillaCluster = nonModifiedCluster,
+                                    Old = nonModifiedZone,
+                                    New = matchingZone,
+                                    Gate = nonModifiedGate
+                                });
+                            }
                         }
+
                     }
                 }
             }

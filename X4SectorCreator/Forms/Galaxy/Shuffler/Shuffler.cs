@@ -162,7 +162,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var subjectName = subject.Name;
             var targetName = target.Name;
             bool flag = (ObligateClusterPairs.ContainsKey(subjectName) &&
-                ObligateClusterPairs[subjectName] == targetName) ||(ObligateClusterPairs.ContainsValue(subjectName) &&
+                ObligateClusterPairs[subjectName] == targetName) || (ObligateClusterPairs.ContainsValue(subjectName) &&
                 ObligateClusterPairs.ReverseLookup(subjectName).First() == targetName);
             return flag;
         }
@@ -187,8 +187,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private static bool SharedOwner(string owner, string targetOwner)
         {
-            return !owner.Equals("none", StringComparison.OrdinalIgnoreCase) && 
-                !targetOwner.Equals("none", StringComparison.OrdinalIgnoreCase) && 
+            return !owner.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                !targetOwner.Equals("none", StringComparison.OrdinalIgnoreCase) &&
                 owner.Equals(targetOwner);
         }
 
@@ -278,7 +278,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             if (FreezeMode)
             {
                 // filter out and merge the domains that ask for it.
-               groups = MergeAndFilterOutDomains(groups);
+                groups = MergeAndFilterOutDomains(groups);
             }
 
             // rebuild the dictionary so each entry is a consolidated domain.
@@ -534,34 +534,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return mergedGroups;
         }
 
-        //private List<int> SequencedDomainFromHash(int idx, HashSet<int> group)
-        //{
-        //    List<int> result = [];
-        //    if (KeepSequence(group.Select(id => territories[id]).ToList()))
-        //    {
-        //        sequentialDomains.Add(idx); //just note that down for now.
-        //        //result = group.OrderBy(x => x).ToList();
-        //        result = group.OrderBy(i => territories[i].Landlocked).ThenBy(i => i).ToList();
-        //    }
-        //    else
-        //    {
-        //        //result = group.OrderBy(x => Random.Shared.Next()).ToList();
-        //        result = group.OrderBy(i => territories[i].Landlocked).ThenBy(x => Random.Shared.Next()).ToList();
-        //    }
-        //    return result;
-        //}
-        //private void SequencesFinalOrder()
-        //{
-        //    foreach (var idx in sequentialDomains)
-        //    {
-        //        var domain = domains[idx];
-        //        if (domain.Where(i => !territories[i].Landlocked).Count() == 1)
-        //        {
-        //            domains[idx] = domain.OrderBy(i => territories[i].Landlocked).ThenBy(i => i).ToList();
-        //        }
-        //    }
-        //}
-
         private void SetDomainsDrawOrder()
         {
             foreach (var set in domains.Where(x => x.Value.Count > 1))
@@ -587,7 +559,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 var territory = territories[idx];
                 if (territory.IsNeutral) continue;
                 var owner = territory.Owner;
-                if (string.IsNullOrEmpty(owner) ) continue;
+                if (string.IsNullOrEmpty(owner)) continue;
                 ownerships.Add(owner.ToLower());
             }
             return ownerships.Count > 1;
@@ -638,7 +610,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Dictionary<string, StagedSet> staged = [];
             Dictionary<string, string> sequencesInParalelBranches = [];
             List<Cluster> misplaced = [], orphanedRoads = [], secondaryRoads = [], unconnected = [];
-            Dictionary<int, ImmutableList<int>> domainsList = domains.Where(x => x.Value.Count > 1).Select(x => (x.Key,x.Value.ToImmutableList())).ToDictionary();
+            Dictionary<int, ImmutableList<int>> domainsList = domains.Where(x => x.Value.Count > 1).Select(x => (x.Key, x.Value.ToImmutableList())).ToDictionary();
             Direction lastXenonSeededBranch = Direction.Undefined;
 
             bool TryGetTerritory(out Territory territory, out bool isSequence, out bool isResuming, out Point pos, out Direction dir, out Direction branch, out string path)
@@ -827,7 +799,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return false;
         }
 
-        private string DirectAncestorStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path) 
+        private string DirectAncestorStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path)
         {
             if (path.Length == 1 && staged.ContainsKey(path)) return path; // a branch can start already staged if it was loaded on branch 0 
             var parent = path.GetParentAddress();
@@ -963,7 +935,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 string parallelBranch = null, closeEnoughAncestor = null;
                 if (path.GetDirection() != path.GetMainBranch())
                 {
-                    closeEnoughAncestor  = CloseEnoughToStaged(staged, sequencesInParalelBranches, path);
+                    closeEnoughAncestor = CloseEnoughToStaged(staged, sequencesInParalelBranches, path);
                     if (closeEnoughAncestor != null && staged.TryGetValue(closeEnoughAncestor, out var parallelSet))
                     {
                         if (parallelSet.Territories.Count > 0)
@@ -1088,7 +1060,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
             if (xenonDomains.Contains(set.Key)) lastXenonSeededBranch = mainBranch;
             bool isSequential = sequentialDomains.Contains(set.Key);
-            if (IsTrunkHoldingSequence(branch) || 
+            if (IsTrunkHoldingSequence(branch) ||
                 (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path)))
             {
                 // Sequential group gets its own branch
@@ -1522,7 +1494,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     subset.Remove(route);
                 }
                 while (subset.Count > 0 && territories[origin.AssignedTerritoryId].neighbors.Contains(destination.AssignedTerritoryId));
-                if (destination == null) continue;
+                if (destination == null || origin.PossibleExits.Count == 0 || destination.PossibleExits.Count == 0) continue;
                 GateBuilder.AddGate(origin, origin.PossibleExits.First(), destination, destination.PossibleExits.First());
                 result++;
                 edges.Remove(route);
@@ -1536,7 +1508,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return result;
         }
 
-        private bool FinalizeNetwork(Dictionary<int,ImmutableList<int>> domainsList)
+        private bool FinalizeNetwork(Dictionary<int, ImmutableList<int>> domainsList)
         {
             string level = MethodBase.GetCurrentMethod().Name;
             bool result = false;
@@ -1610,6 +1582,16 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return groups;
         }
 
+        private void RemoveGatesSelectively(Territory territory)
+        {
+            foreach (var exit in DisposableConnections(territory))
+            {
+                var gate = exit.gate;
+                var zone = gate.ParentZone;
+                zone.Gates.Remove(gate);
+            }
+        }
+
         private void RemoveGatesSelectively(Territory territory, HashSet<Cluster> outgoing)
         {
             foreach (var exit in DisposableConnections(territory))
@@ -1631,6 +1613,86 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     territories[exit.destination.AssignedTerritoryId].Landlocked) continue;
                 yield return exit;
             }
+        }
+
+        private void _Reconnect(Territory territory, Direction alsoReachFor, bool firstRun, bool isSequence, bool isResuming, List<Cluster> orphanedRoads, List<Cluster> secondaryRoads)
+        {
+            HashSet<Cluster> outgoing = [];
+
+            bool FindBridgeManagePools(HashSet<Cluster> originCandidates, List<Cluster> destinationsPool, bool removeDestination, out (Cluster from, Cluster to) bridge, Predicate<(Cluster, Cluster)> filter = null)
+            {
+                bool result = false;
+                bridge = FindBridge(originCandidates, destinationsPool, out result, gateMaxDist, filter);
+                if (result && bridge.from != null && bridge.to != null)
+                {
+                    if (removeDestination)
+                    {
+                        destinationsPool.Remove(bridge.to);
+                        //secondaryRoads.Add(bridge.to);
+                    }
+                    if (outgoing.Contains(bridge.from))
+                    {
+                        outgoing.Remove(bridge.from);
+                        //secondaryRoads.Add(bridge.from);
+                    }
+                }
+                return result;
+            }
+
+            if (territory.ExitGates != null && !territory.isBridge)
+            {
+                RemoveGatesSelectively(territory);
+                foreach (var cluster in territory.Clusters)
+                {
+                    outgoing.Add(cluster);
+                }
+                if (!isSequence || !isResuming)
+                {
+                    bool connected = false, reachedAcross = false;
+                    int territoryConnected = -1;
+                    List<Cluster> used = [];
+                    if (!firstRun)
+                    {
+                        connected = FindBridgeManagePools(outgoing, orphanedRoads, true, out var bridge);
+                        if (connected)
+                        {
+                            territoryConnected = bridge.to.AssignedTerritoryId;
+                            used.Add(bridge.from);
+                        }
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reconnect {territory.seed.Name}: {(connected ? $"SUCESS! Connected {bridge.from} to {bridge.to}" : $"FAILED! Outgoing clusters: {outgoing.Count()}")}.");
+                    }
+                    //if (outgoing.Count > 0 && alsoReachFor != Direction.Undefined)
+                    //{
+                    //    var outgoingSub = outgoing.Where(x => x.Direction != (int)alsoReachFor.OppositeDir()).ToHashSet();
+                    //    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"DEBUG: alsoReachFor = {alsoReachFor}, outgoing = {outgoingSub.Count}, [{string.Join(", ", outgoingSub.Select(x => x.Direction).ToList())}].");
+                    //    if (outgoingSub.Count > 0)
+                    //    {
+                    //        //reachedAcross = FindBridgeManagePools(outgoingSub, orphanedRoads, true, out var bridgeAcross, pair => CanConnectFromDirection(pair, alsoReachFor));
+                    //        //if (!reachedAcross)
+                    //        //{
+                    //        string compText = null;
+                    //        var secondarySub = connected ? secondaryRoads.Where(x => x.AssignedTerritoryId != territoryConnected).ToList() : secondaryRoads;
+                    //        if (secondarySub.Count > 0)
+                    //        {
+                    //            reachedAcross = FindBridgeManagePools(outgoingSub, secondarySub, false, out var bridgeAcross, pair => CanConnectFromDirection(pair, alsoReachFor));
+                    //            if (reachedAcross) used.Add(bridgeAcross.from);
+                    //            compText = reachedAcross ? $"SUCESS! Connected {bridgeAcross.from} to {bridgeAcross.to}" : $"FAILED! Outgoing clusters: {outgoingSub.Count()}";
+                    //        }
+                    //        //}
+                    //        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Attempt to reach {alsoReachFor} from {territory.seed}: {compText}.");
+                    //    }
+                    //}
+                    //if (!connected && !reachedAcross) orphanedRoads.AddRange(outgoing);
+                    orphanedRoads.AddRange(outgoing);
+
+                }
+                else
+                {
+                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Avoided reconnecting {territory.seed} to avoid redundant gates on a sequence. (isSequence={isSequence}, isResuming={isResuming})");
+                }
+            }
+            if (territory.absorbedExits.Count() > 0) secondaryRoads.AddRange(territory.absorbedExits);
+            territory.SetUpConnections();
         }
 
         private void Reconnect(Territory territory, Direction alsoReachFor, bool firstRun, bool isSequence, bool isResuming, List<Cluster> orphanedRoads, List<Cluster> secondaryRoads)
@@ -1679,6 +1741,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     if (outgoing.Count > 0 && alsoReachFor != Direction.Undefined)
                     {
                         var outgoingSub = outgoing.Where(x => x.Direction != (int)alsoReachFor.OppositeDir()).ToHashSet();
+                        _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"DEBUG: alsoReachFor = {alsoReachFor}, outgoing = {outgoingSub.Count}, [{string.Join(", ", outgoingSub.Select(x => x.Direction).ToList())}].");
                         if (outgoingSub.Count > 0)
                         {
                             reachedAcross = FindBridgeManagePools(outgoingSub, orphanedRoads, true, out var bridgeAcross, pair => CanConnectFromDirection(pair, alsoReachFor));

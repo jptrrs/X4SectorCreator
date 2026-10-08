@@ -5,6 +5,7 @@
         public List<ModifiedCluster> ModifiedClusters { get; set; } = [];
         public List<Cluster> RemovedClusters { get; set; } = [];
         public List<ModifiedSector> ModifiedSectors { get; set; } = [];
+        public List<ModifiedZone> ModifiedZones { get; set; } = [];
         public List<RemovedSector> RemovedSectors { get; set; } = [];
         public List<RemovedConnection> RemovedConnections { get; set; } = [];
 
@@ -87,6 +88,14 @@
         public Cluster VanillaCluster { get; set; }
         public Sector Old { get; set; }
         public Sector New { get; set; }
+    }
+
+    public class ModifiedZone
+    {
+        public Cluster VanillaCluster { get; set; }
+        public Zone Old { get; set; }
+        public Zone New { get; set; }
+        public Gate Gate { get; set; }
     }
 
     public class RemovedSector
