@@ -1,4 +1,5 @@
 ﻿using System.Collections.Immutable;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -6,6 +7,8 @@ using X4SectorCreator.Forms.Galaxy.ProceduralGeneration;
 using X4SectorCreator.Forms.Galaxy.ProceduralGeneration.Algorithms.GateAlgorithms;
 using X4SectorCreator.Helpers;
 using X4SectorCreator.Objects;
+using static System.Windows.Forms.AxHost;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TreeView;
 using static X4SectorCreator.Forms.Galaxy.Shuffler.AdditionalVanillaMapping;
 using static X4SectorCreator.Helpers.Toolbox;
 
@@ -604,8 +607,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             List<int> cards = territories.Keys.ToList();
             Random.Shared.Shuffle(CollectionsMarshal.AsSpan(cards));
-            Queue<(Point pos, string path)> slots = new([(Point.Empty, "0")]), deferred = [];
-            SortedSet<cPoint> occupied = [];
+            Queue<Slot> slots = new(new[] { new Slot() { Position = Point.Empty, Path = "0" } }), deferred = new();
+            SortedSet<cPoint> occupied = new();
             bool inBounds = true, firstRun = true;
             Dictionary<string, StagedSet> staged = [];
             Dictionary<string, string> sequencesInParalelBranches = [];
@@ -613,7 +616,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Dictionary<int, ImmutableList<int>> domainsList = domains.Where(x => x.Value.Count > 1).Select(x => (x.Key, x.Value.ToImmutableList())).ToDictionary();
             Direction lastXenonSeededBranch = Direction.Undefined;
 
-            bool TryGetTerritory(out Territory territory, out bool isSequence, out bool isResuming, out Point pos, out Direction dir, out Direction branch, out string path)
+            bool TryGetTerritory(out Territory territory, out bool isSequence, out bool isResuming, out Point pos, out Direction dir, out Direction branch, out string path, out Slot slot)
             {
                 bool flag = false;
                 territory = null;
@@ -624,14 +627,16 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 branch = Direction.Undefined;
                 path = null;
                 int skipTracker = 0;
+                slot = null;
                 while (slots.Count > 0)
                 {
-                    var slot = slots.Dequeue();
-                    path = slot.path;
-                    pos = slot.pos;
+                    slot = slots.Dequeue();
+                    path = slot.Path;
+                    pos = slot.Position;
                     dir = path.GetDirection();
                     branch = path.GetMainBranch();
-                    territory = PickNextFromStaged(staged, sequencesInParalelBranches, slot.path, ref lastXenonSeededBranch, ref skipTracker, out isSequence, out isResuming);
+                    //territory = PickNextFromStaged(staged, sequencesInParalelBranches, slot.path, ref lastXenonSeededBranch, ref skipTracker, out isSequence, out isResuming);
+                    territory = PickNextFromSlot(slot, ref lastXenonSeededBranch, ref skipTracker, out isSequence, out isResuming);
                     flag = territory != null;
                     if (flag)
                     {
@@ -663,7 +668,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             for (int i = 0; i < cards.Count; i++)
             {
-                bool valid = TryGetTerritory(out var territory, out var isSequence, out var isResuming, out var position, out var direction, out var branch, out var path);
+                bool valid = TryGetTerritory(out var territory, out var isSequence, out var isResuming, out var position, out var direction, out var branch, out var path, out var slot);
 
                 //Reporting territory selection
                 _ = LogAsync(level, $"Step {i}, branch {branch}, slot @ {position.ToTuple()}/{direction}/{path}", true);
@@ -724,13 +729,13 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 Reconnect(territory, reachDir, firstRun, isSequence, isResuming, orphanedRoads, secondaryRoads);
 
                 //Prepare the next slots.
-                var nextSlots = NextSlotsHelix(territory, occupied, path);
+                var nextSlots = NextSlotsHelix(territory, occupied, slot);
 
                 //bool isSequential = sequentialDomains.Contains(territory.AssignedDomainId);
-                foreach (var (pos, add) in nextSlots)
+                foreach (var node in nextSlots)
                 {
-                    if (InBounds(pos) || isSequence) slots.Enqueue((pos, add));
-                    else deferred.Enqueue((pos, add));
+                    if (InBounds(node.Position) || isSequence) slots.Enqueue(node);
+                    else deferred.Enqueue(node);
                 }
                 firstRun = false;
             }
@@ -843,8 +848,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return null;
         }
 
-        private List<(Point position, string address)> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, string parentAddress)
+        private List<Slot> NextSlotsHelix(Territory territory, SortedSet<cPoint> occupied, Slot parent)
         {
+            var parentAddress = parent.Path;
             var branch = parentAddress.GetMainBranch();
             var lastDir = parentAddress.GetDirection();
             bool firstRun = branch == Direction.Undefined;
@@ -854,7 +860,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var ay = territory.Anchor.Y;
             var width = territory.size.X;
             var height = territory.HeightToFit;
-            var slots = new List<(Point pos, string add)>();
+            var slots = new List<Slot>();
             var max = occupied.Max();
             var min = occupied.Min();
             if (cycle) helixGeneration++;
@@ -864,18 +870,18 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             string level = MethodBase.GetCurrentMethod().Name;
 
             //finishing routine
-            void Select(Point slot, Direction dir)
+            void Select(Point pos, Direction dir)
             {
-                bool front = slot.X > max.X || slot.X < min.X || slot.Y > max.Y || slot.Y < min.Y;
-                if (front || !occupied.Contains(slot))
+                bool front = pos.X > max.X || pos.X < min.X || pos.Y > max.Y || pos.Y < min.Y;
+                if (front || !occupied.Contains(pos))
                 {
                     var add = parentAddress.DownstreamAddress(dir);
-                    slots.Add((slot, add));
-                    log.Add($"{slot.ToTuple()}/{dir}/{add}");
+                    slots.Add(new Slot() { Position = pos, Direction = dir, Path = add, Parent = parent });
+                    log.Add($"{pos.ToTuple()}/{dir}/{add}");
                 }
                 else
                 {
-                    _ = LogAsync(level, $"{slot.ToTuple()}{dir} was already occupied, slot skipped! Branch: {branch})");
+                    _ = LogAsync(level, $"{pos.ToTuple()}{dir} was already occupied, slot skipped! Branch: {branch})");
                 }
             }
 
@@ -909,180 +915,241 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return slots.ToList();
         }
 
-        private Territory PickNextFromStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, string path, ref Direction lastXenonSeededBranch, ref int skipTracker, out bool isSequence, out bool isResuming)
+        private Territory PickNextFromSlot(Slot node, ref Direction lastXenonSeededBranch, ref int skipTracker, out bool isSequence, out bool isResuming)
         {
-            bool domsRemain = domains.Count > 0, stagedRemain = staged.Count > 0, firstRun = false, foundAny = false;
+            Territory selected = null;
             isResuming = false;
             isSequence = false;
-            string branch = null;
-            var report = new StringBuilder();
 
-            if (domsRemain) firstRun = !stagedRemain;
-            else if (stagedRemain && staged.Values.All(x => x.Territories.Count == 0))
+            // 1. If there's a queue on the parent node, draw from that.
+            var parent = node.Parent;
+            if (parent != null && parent.staged?.Count > 0)
             {
-                //Bail out if something hasn't been intialized or the lists have been exausted.
-                _ = LogAsync(MethodBase.GetCurrentMethod().Name,
-                    $"ERROR: all staged domains were empty!");
+                isResuming = true;
+                isSequence = parent.IsSequential;
+                // filters out splitting branches for sequences.
+                if (!isSequence || parent.Path.GetDirection() == node.Path.GetDirection()) 
+                {
+                    node.IsSequential = isSequence;
+                    selected = territories[parent.staged.Dequeue()];
+                    node.staged = parent.staged;
+                    return selected;
+                }
+            }
+
+            // 2. If all domains were used already, that's the end.
+            bool domsRemain = domains.Count > 0;
+            if (!domsRemain)
+            {
+                skipTracker++;
                 return null;
             }
 
-            if (!firstRun)
-            {
-
-                //Detect if any of the staged groups fit the current slot:
-                // A. Look into the parallel branch, if any. In that case, the drafted set can't be a sequence (it can only be linear).
-                bool setOnParallel = false;
-                string parallelBranch = null, closeEnoughAncestor = null;
-                if (path.GetDirection() != path.GetMainBranch())
-                {
-                    closeEnoughAncestor = CloseEnoughToStaged(staged, sequencesInParalelBranches, path);
-                    if (closeEnoughAncestor != null && staged.TryGetValue(closeEnoughAncestor, out var parallelSet))
-                    {
-                        if (parallelSet.Territories.Count > 0)
-                        {
-                            setOnParallel = !parallelSet.IsSequential;
-                            parallelBranch = closeEnoughAncestor;
-                        }
-                        else
-                        {
-                            staged.Remove(closeEnoughAncestor);
-                            CleanUpParalelNotes(sequencesInParalelBranches, closeEnoughAncestor);
-                        }
-                    }
-                }
-
-                // B. Look into the slot's direct ancestor.
-                var directAncestor = DirectAncestorStaged(staged, sequencesInParalelBranches, path);
-                bool setOnDirect = false;
-                string directBranch = null;
-                if (directAncestor != null && staged.TryGetValue(directAncestor, out var directSet))
-                {
-                    if (directSet.Territories.Count > 0)
-                    {
-                        setOnDirect = true;
-                        directBranch = directAncestor;
-                    }
-                    else staged.Remove(directAncestor);
-                }
-
-                //Decide which one to use, if any
-                foundAny = setOnDirect || setOnParallel;
-                branch = directBranch ?? parallelBranch;
-                if (foundAny)
-                {
-                    report.Append($"Resuming branch {branch} ");
-                    if (setOnParallel && !setOnDirect)
-                    {
-                        sequencesInParalelBranches.TryAdd(path, parallelBranch);
-                        report.Append("from a parallel line");
-                    }
-                    else report.Append("down");
-                    report.Append($" from {path}.");
-                    //_ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: Found ancestors for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}", true);
-                }
-                //else
-                //    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: No ancestors found for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}", true);
-            }
-
-            //If none of that worked, fall back to whoever is assigned to the base of that branch
-            if (!foundAny)
-            {
-                branch = path.GetAddressAtDepth(1);
-                if (string.IsNullOrEmpty(branch) || branch == "0")
-                {
-                    //Prevents the domain called at the origin from generating a dead-end entry.
-                    branch = "1";
-                }
-
-                if (!staged.Where(x => x.Key != branch).ToDictionary().TryGetValue(branch, out var baseSet) || baseSet.Territories.Count <= 0)
-                {
-                    //There were no groups on stage to draw from, meaning it's time to reset it.
-                    //First, if all domains were used already, that's the end.
-                    if (!domsRemain)
-                    {
-                        skipTracker++;
-                        return null;
-                    }
-                    //Otherwise, load another set:
-                    //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
-                    branch = RefreshStage(staged, branch, path, ref lastXenonSeededBranch);
-
-                    //Guaranteee there's a valid staged set after this. Note: double lookup is strictly necessary 
-                    if (!staged.TryGetValue(branch, out baseSet) || baseSet.Territories.Count == 0)
-                    {
-                        _ = LogAsync(MethodBase.GetCurrentMethod().Name,
-                            $"ERROR: unable to find a valid domain set in the staged collection.");
-                        return null;
-                    }
-                }
-                report.Append($"Loading a new set into branch {branch}.");
-            }
-
-            var selected = staged[branch];
-            isResuming = selected.Resuming;
-            isSequence = selected.IsSequential;
-            var card = selected.Next();
-            report.Append($" Selected: {card}");
-            if (selected.Territories.Count > 0) report.Append($" (remaining: [{string.Join(", ", selected.Territories)}])");
-            else staged.Remove(branch);
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, report.ToString() + ".", true);
-            return territories[card];
-        }
-
-        private static void CleanUpParalelNotes(Dictionary<string, string> sequencesInParalelBranches, string branch)
-        {
-            var obsoleteParallels = sequencesInParalelBranches.ReverseLookup(branch);
-            foreach (var key in obsoleteParallels)
-            {
-                sequencesInParalelBranches.Remove(key);
-            }
-        }
-
-        private void CleanupDepletedDomains()
-        {
-            var depleted = domains.Where(x => x.Key > 9 && x.Value.Count == 0).Select(x => x.Key).ToList();
-            foreach (var key in depleted)
-            {
-                domains.Remove(key);
-            }
-        }
-
-        private string RefreshStage(Dictionary<string, StagedSet> staged, string branch, string path, ref Direction lastXenonSeededBranch)
-        {
+            // 3. Core functionality: pick a domain, and if it's a sequence, stage the rest of the territories for the next slots.
+            var path = node.Path;
             var mainBranch = path.GetMainBranch();
-            bool xenonAllowed = path.Length > 0 && mainBranch != lastXenonSeededBranch;
+            // Barring the Xenon from being at the centre, for gameplay reasons.
+            bool xenonAllowed = path.Length > 2 && mainBranch != lastXenonSeededBranch;
             var regular = domains.Where(x => !xenonDomains.Contains(x.Key));
             var set = (xenonAllowed || regular.Count() == 0) ? domains.Random() : regular.Random();
             if (set.Value == null)
             {
                 _ = LogAsync(MethodBase.GetCurrentMethod().Name,
-                    $"ERROR: selected domain has a null list! Looking for branch {branch}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+                    $"ERROR: selected domain has a null list! Looking for path {path}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
             }
             if (xenonDomains.Contains(set.Key)) lastXenonSeededBranch = mainBranch;
-            bool isSequential = sequentialDomains.Contains(set.Key);
-            if (IsTrunkHoldingSequence(branch) ||
-                (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path)))
+            if (set.Value.Count == 1)
             {
-                // Sequential group gets its own branch
-                staged.Add(path, new StagedSet { Territories = set.Value, IsSequential = isSequential });
-                branch = path;
+                selected = territories[set.Value[0]];
             }
             else
             {
-                // Replace or add to existing branch (for trunk branches)
-                staged[branch] = new StagedSet { Territories = set.Value, IsSequential = isSequential };
+                selected = territories[set.Value.First()];
+                var queue = set.Value.Skip(1).ToList();
+                node.staged = new Queue<int>(queue);
+                isSequence = sequentialDomains.Contains(set.Key);
+                node.IsSequential = isSequence;
             }
             domains.Remove(set.Key);
+            return selected;
             //_ = LogAsync(MethodBase.GetCurrentMethod().Name,
             //    $"New domain drafted: [{string.Join(", ", set.Value)}].{(isSequential ? " It's a sequence!":"")} Loaded to branch {branch}.", true);
-            return branch;
         }
 
-        private bool IsTrunkHoldingSequence(string branch)
-        {
-            // Meaning trunk branch itself is occupied by a sequence. Detecting this prevents some issues.
-            return branch.Length == 1 && sequentialDomains.Contains(branch[0] - '0');
-        }
+        //private Territory PickNextFromStaged(Dictionary<string, StagedSet> staged, Dictionary<string, string> sequencesInParalelBranches, Slot slot, ref Direction lastXenonSeededBranch, ref int skipTracker, out bool isSequence, out bool isResuming)
+        //{
+        //    bool domsRemain = domains.Count > 0, stagedRemain = staged.Count > 0, firstRun = false, foundAny = false;
+        //    isResuming = false;
+        //    isSequence = false;
+        //    string branch = null;
+        //    var report = new StringBuilder();
+
+        //    if (domsRemain) firstRun = !stagedRemain;
+        //    else if (stagedRemain && staged.Values.All(x => x.Territories.Count == 0))
+        //    {
+        //        //Bail out if something hasn't been intialized or the lists have been exausted.
+        //        _ = LogAsync(MethodBase.GetCurrentMethod().Name,
+        //            $"ERROR: all staged domains were empty!");
+        //        return null;
+        //    }
+
+        //    if (!firstRun)
+        //    {
+
+        //        //Detect if any of the staged groups fit the current slot:
+        //        // A. Look into the parallel branch, if any. In that case, the drafted set can't be a sequence (it can only be linear).
+        //        bool setOnParallel = false;
+        //        string parallelBranch = null, closeEnoughAncestor = null;
+        //        if (path.GetDirection() != path.GetMainBranch())
+        //        {
+        //            closeEnoughAncestor = CloseEnoughToStaged(staged, sequencesInParalelBranches, path);
+        //            if (closeEnoughAncestor != null && staged.TryGetValue(closeEnoughAncestor, out var parallelSet))
+        //            {
+        //                if (parallelSet.Territories.Count > 0)
+        //                {
+        //                    setOnParallel = !parallelSet.IsSequential;
+        //                    parallelBranch = closeEnoughAncestor;
+        //                }
+        //                else
+        //                {
+        //                    staged.Remove(closeEnoughAncestor);
+        //                    CleanUpParalelNotes(sequencesInParalelBranches, closeEnoughAncestor);
+        //                }
+        //            }
+        //        }
+
+        //        // B. Look into the slot's direct ancestor.
+        //        var directAncestor = DirectAncestorStaged(staged, sequencesInParalelBranches, path);
+        //        bool setOnDirect = false;
+        //        string directBranch = null;
+        //        if (directAncestor != null && staged.TryGetValue(directAncestor, out var directSet))
+        //        {
+        //            if (directSet.Territories.Count > 0)
+        //            {
+        //                setOnDirect = true;
+        //                directBranch = directAncestor;
+        //            }
+        //            else staged.Remove(directAncestor);
+        //        }
+
+        //        //Decide which one to use, if any
+        //        foundAny = setOnDirect || setOnParallel;
+        //        branch = directBranch ?? parallelBranch;
+        //        if (foundAny)
+        //        {
+        //            report.Append($"Resuming branch {branch} ");
+        //            if (setOnParallel && !setOnDirect)
+        //            {
+        //                sequencesInParalelBranches.TryAdd(path, parallelBranch);
+        //                report.Append("from a parallel line");
+        //            }
+        //            else report.Append("down");
+        //            report.Append($" from {path}.");
+        //            //_ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: Found ancestors for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}", true);
+        //        }
+        //        //else
+        //        //    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: No ancestors found for path {path}.\nParallel: closeEnoughAncestor={closeEnoughAncestor}, setOnParallel={setOnParallel}. Direct: directAncestor={directAncestor}, setOnDirect={setOnDirect}. Stage:\n{string.Join("\n", staged.Select(x => $"#{x.Key}[{string.Join(",", x.Value.Territories)}]"))}.\nSequences in Parallel Branches:\n{string.Join("\n", sequencesInParalelBranches.Select(x => $"#{x.Key} - {x.Value}"))}", true);
+        //    }
+
+        //    //If none of that worked, fall back to whoever is assigned to the base of that branch
+        //    if (!foundAny)
+        //    {
+        //        branch = path.GetAddressAtDepth(1);
+        //        if (string.IsNullOrEmpty(branch) || branch == "0")
+        //        {
+        //            //Prevents the domain called at the origin from generating a dead-end entry.
+        //            branch = "1";
+        //        }
+
+        //        if (!staged.Where(x => x.Key != branch).ToDictionary().TryGetValue(branch, out var baseSet) || baseSet.Territories.Count <= 0)
+        //        {
+        //            //There were no groups on stage to draw from, meaning it's time to reset it.
+        //            //First, if all domains were used already, that's the end.
+        //            if (!domsRemain)
+        //            {
+        //                skipTracker++;
+        //                return null;
+        //            }
+        //            //Otherwise, load another set:
+        //            //NOTE: A new sequence starts here. It both selects the sequence set and changes the branch, creating a divergence.
+        //            branch = RefreshStage(staged, branch, path, ref lastXenonSeededBranch);
+
+        //            //Guaranteee there's a valid staged set after this. Note: double lookup is strictly necessary 
+        //            if (!staged.TryGetValue(branch, out baseSet) || baseSet.Territories.Count == 0)
+        //            {
+        //                _ = LogAsync(MethodBase.GetCurrentMethod().Name,
+        //                    $"ERROR: unable to find a valid domain set in the staged collection.");
+        //                return null;
+        //            }
+        //        }
+        //        report.Append($"Loading a new set into branch {branch}.");
+        //    }
+
+        //    var selected = staged[branch];
+        //    isResuming = selected.Resuming;
+        //    isSequence = selected.IsSequential;
+        //    var card = selected.Next();
+        //    report.Append($" Selected: {card}");
+        //    if (selected.Territories.Count > 0) report.Append($" (remaining: [{string.Join(", ", selected.Territories)}])");
+        //    else staged.Remove(branch);
+        //    _ = LogAsync(MethodBase.GetCurrentMethod().Name, report.ToString() + ".", true);
+        //    return territories[card];
+        //}
+
+        //private static void CleanUpParalelNotes(Dictionary<string, string> sequencesInParalelBranches, string branch)
+        //{
+        //    var obsoleteParallels = sequencesInParalelBranches.ReverseLookup(branch);
+        //    foreach (var key in obsoleteParallels)
+        //    {
+        //        sequencesInParalelBranches.Remove(key);
+        //    }
+        //}
+
+        //private void CleanupDepletedDomains()
+        //{
+        //    var depleted = domains.Where(x => x.Key > 9 && x.Value.Count == 0).Select(x => x.Key).ToList();
+        //    foreach (var key in depleted)
+        //    {
+        //        domains.Remove(key);
+        //    }
+        //}
+
+        //private string RefreshStage(Dictionary<string, StagedSet> staged, string branch, string path, ref Direction lastXenonSeededBranch)
+        //{
+        //    var mainBranch = path.GetMainBranch();
+        //    bool xenonAllowed = path.Length > 0 && mainBranch != lastXenonSeededBranch;
+        //    var regular = domains.Where(x => !xenonDomains.Contains(x.Key));
+        //    var set = (xenonAllowed || regular.Count() == 0) ? domains.Random() : regular.Random();
+        //    if (set.Value == null)
+        //    {
+        //        _ = LogAsync(MethodBase.GetCurrentMethod().Name,
+        //            $"ERROR: selected domain has a null list! Looking for branch {branch}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
+        //    }
+        //    if (xenonDomains.Contains(set.Key)) lastXenonSeededBranch = mainBranch;
+        //    bool isSequential = sequentialDomains.Contains(set.Key);
+        //    if (IsTrunkHoldingSequence(branch) ||
+        //        (set.Value.Count > 1 && !path.Equals("0") && !staged.ContainsKey(path)))
+        //    {
+        //        // Sequential group gets its own branch
+        //        staged.Add(path, new StagedSet { Territories = set.Value, IsSequential = isSequential });
+        //        branch = path;
+        //    }
+        //    else
+        //    {
+        //        // Replace or add to existing branch (for trunk branches)
+        //        staged[branch] = new StagedSet { Territories = set.Value, IsSequential = isSequential };
+        //    }
+        //    domains.Remove(set.Key);
+        //    //_ = LogAsync(MethodBase.GetCurrentMethod().Name,
+        //    //    $"New domain drafted: [{string.Join(", ", set.Value)}].{(isSequential ? " It's a sequence!":"")} Loaded to branch {branch}.", true);
+        //    return branch;
+        //}
+
+        //private bool IsTrunkHoldingSequence(string branch)
+        //{
+        //    // Meaning trunk branch itself is occupied by a sequence. Detecting this prevents some issues.
+        //    return branch.Length == 1 && sequentialDomains.Contains(branch[0] - '0');
+        //}
 
         private void UpdateClusterMap(List<Cluster> clusters, List<Cluster> misplaced)
         {
@@ -1831,5 +1898,20 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             Resuming = true;
             return result;
         }
+    }
+
+    internal class Slot
+    {
+        public Point Position { get; set; }
+        public Direction Direction { get; set; }
+        public string Path { get; set; }
+        public bool Flushed { get; set; }
+        public Point FlushVector { get; set; }
+        public Territory Territory { get; set; }
+        public int AssignedDomainId => Territory.assignedDomainId;
+        public Slot Parent { get; set; }
+
+        public Queue<int> staged = [];
+        public bool IsSequential { get; set; }
     }
 }
