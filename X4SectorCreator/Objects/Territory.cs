@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Xml.Linq;
 using X4SectorCreator.Forms.Galaxy.Shuffler;
 using X4SectorCreator.Helpers;
 
@@ -10,12 +11,11 @@ namespace X4SectorCreator.Objects
         internal List<cPoint> contour = [];
         internal string dlc;
         internal Direction exitDirection;
-        internal List<Cluster> bordering = [];
+        internal List<Cluster> absorbedExits = [], bordering = [];
         internal int id, assignedDomainId;
-        internal bool isBridge = false, origin = false, toMerge = false, unconnected = false;
+        internal bool isBridge = false, origin = false, toMerge = false, unconnected = false, hasAffinity = false;
         internal Cluster seed;
         internal Point size = Point.Empty;
-        internal List<Cluster> absorbedExits = [];
         internal HashSet<int> neighbors = [];
         
         private int[] box = new int[4];
@@ -80,6 +80,11 @@ namespace X4SectorCreator.Objects
             } 
         }
 
+        public override string ToString()
+        {
+            return seed.Name ?? "Unknown";
+        }
+
         internal void SetUpConnections()
         {
             connections.Clear();
@@ -129,23 +134,32 @@ namespace X4SectorCreator.Objects
             }
         }
 
-        // Determines if all clusters in the territory belong tp the same owner, ignoring vacant clusters and disputes with the Xenon. Xenon-only territories return positive, though.
+        // Determines if all clusters in the territory belong to the same owner, ignoring vacant clusters and disputes with the Xenon. Xenon-only territories return positive, though.
         internal bool SameOwner
         {
             get
             {
                 if (sameOwner == null)
                 {
-                    HashSet<string> ownerships = Ownerships();
-                    bool allSameOwner = ownerships != null && ownerships.Count == 1;
-                    bool anyXenon = ownerships.Contains(AdditionalVanillaMapping.XenonName);
-                    bool xenonInvading = anyXenon && !allSameOwner && ownerships.Count == 2;
-                    sameOwner = allSameOwner || xenonInvading;
-                    isXenon = anyXenon && allSameOwner;
-                    if (owner == null && (bool)sameOwner)
+                    if (IsNeutral)
                     {
-                        if (xenonInvading) ownerships.Remove(AdditionalVanillaMapping.XenonName);
-                        owner = ownerships.First();
+                        sameOwner = true;
+                        isXenon = false;
+                        owner = "none";
+                    }
+                    else
+                    {
+                        HashSet<string> ownerships = Ownerships();
+                        bool allSameOwner = ownerships != null && ownerships.Count == 1;
+                        bool anyXenon = ownerships.Contains(AdditionalVanillaMapping.XenonName);
+                        bool xenonInvading = anyXenon && !allSameOwner && ownerships.Count == 2;
+                        sameOwner = allSameOwner || xenonInvading;
+                        isXenon = anyXenon && allSameOwner;
+                        if (owner == null && (bool)sameOwner)
+                        {
+                            if (xenonInvading) ownerships.Remove(AdditionalVanillaMapping.XenonName);
+                            owner = ownerships.First();
+                        }
                     }
                 }
                 return (bool)sameOwner;
@@ -158,13 +172,13 @@ namespace X4SectorCreator.Objects
             foreach (var cluster in Clusters)
             {
                 var owner = cluster.GetOwnerShip();
-                if (string.IsNullOrEmpty(owner) || owner.Equals("None")) continue;
+                if (string.IsNullOrEmpty(owner) || owner.Equals("None", StringComparison.OrdinalIgnoreCase)) continue;
                 ownerships.Add(owner.ToLower());
             }
             return ownerships;
         }
 
-        internal bool IsXenon => SameOwner && isXenon == true;
+        internal bool IsXenon => SameOwner && (bool)isXenon;
 
         internal string Owner
         {

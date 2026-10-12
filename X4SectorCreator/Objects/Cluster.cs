@@ -179,8 +179,8 @@ namespace X4SectorCreator.Objects
             var ownerships = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var sector in Sectors)
             {
+                if (sector.IsNeutral) continue;
                 string owner = sector.CurrentOwner;
-                if (string.IsNullOrEmpty(owner)) continue;
                 if (AdditionalVanillaMapping.VassalFactions.ContainsKey(owner))
                 {
                     owner = AdditionalVanillaMapping.VassalFactions[owner];
