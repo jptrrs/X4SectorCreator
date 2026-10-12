@@ -17,11 +17,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             { "holyorder", "paranid" }
         };
 
-        internal static Dictionary<string, string> ObligateClusterPairs = new(StringComparer.OrdinalIgnoreCase)
+        internal static Dictionary<string, string> MandatoryGateways = new(StringComparer.OrdinalIgnoreCase)
         {
+            // Order matters. The second cluster and the territory behind it will be pushed out.
             { "Heretic's End", "Watchful Gaze" },
-            //{ "Getsu Fune", "Asteroid Belt" },
-            //{ "Mitsuno's Revelation", "Ianamus Zura" }
+            { "Getsu Fune", "Asteroid Belt" },
+            { "Ianamus Zura", "Mitsuno's Revelation" }
         };
 
         private static Dictionary<string, string> vanillaPoliceCached;

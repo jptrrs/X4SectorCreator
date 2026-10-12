@@ -12,8 +12,8 @@ namespace X4SectorCreator.Objects
         internal string dlc;
         internal Direction exitDirection;
         internal List<Cluster> absorbedExits = [], bordering = [];
-        internal int id, assignedDomainId;
-        internal bool isBridge = false, origin = false, toMerge = false, unconnected = false, hasAffinity = false;
+        internal int id, assignedDomainId, gatewayTo = -1;
+        internal bool isBridge = false, origin = false, toMerge = false, unconnected = false, behindGateway = false;
         internal Cluster seed;
         internal Point size = Point.Empty;
         internal HashSet<int> neighbors = [];
