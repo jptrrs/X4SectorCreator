@@ -299,7 +299,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             SetDomainsDrawOrder();
 
             // logging
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s): {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value.Territories)}]{(x.Value.IsSequential ? "S" : "")}"))}.");
+            _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"Consolidated {domains.Count} domain(s):\n{string.Join("\n", domains.Values
+                .Select(x => $"#{x.Id}: {x.Owner}{(x.IsSequential ? ", sequencial" : "")}{(x.Affinities.Count > 0 ? $", {x.Affinities.Count} affinities":"")} ({string.Join(", ", x.Territories.Select(t => territories[t]))})"))}.");
         }
 
         private void DesignateDomains()
@@ -351,13 +352,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         d.Affinities.AddUnique(match.Id);
                         match.Affinities.AddUnique(d.Id);
                     }
-                }
-            }
-            foreach (var d in domains.Values)
-            {
-                if (!d.IsNeutral && !d.IsDivided)
-                {
-                    _ = LogAsync(MethodBase.GetCurrentMethod().Name, $"PROBE: {d.Affinities.Count} affinities for #{d.Id} ({d.Owner}, {territories[d.Territories.First()]}): {string.Join(", ", d.Affinities)}");
                 }
             }
         }
@@ -579,16 +573,23 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private void SetDomainsDrawOrder()
         {
-            foreach (var set in domains.Where(x => x.Value.Territories.Count > 1))
+            foreach (var set in domains.Values.Where(x => x.Territories.Count > 1))
             {
-                var territoriesList = set.Value.Territories;
+                var territoriesList = set.Territories;
                 //order by owner only makes a difference for some cases.
-                Func<int, int> finalOrder = set.Value.IsSequential ? (i => i) : (i => Random.Shared.Next());
-                //if (SplitOwnerships(set.Value.Territories))
-                if (set.Value.IsDivided)
+                Func<int, int> finalOrder = set.IsSequential ? (i => i) : (i => Random.Shared.Next());
+                
+                //For domains joined by affinity:
+                if (set.IsDivided)
                 {
                     territoriesList = territoriesList.OrderBy(i => territories[i].Owner).ThenBy(i => territories[i].Landlocked).ThenBy(finalOrder).ToList();
                 }
+                //For close colonies:
+                else if (!territoriesList.Any(i => territories[i].isBridge))
+                {
+                    territoriesList = territoriesList.OrderBy(finalOrder).ToList();
+                }
+                //for everyone else:
                 else
                 {
                     territoriesList = territoriesList.OrderBy(i => territories[i].Landlocked).ThenBy(finalOrder).ToList();
@@ -689,9 +690,12 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         else
                         {
                             //end of the line
-                            _ = LogAsync(level, $"ERROR: we've run out of slots!");
                         }
                     }
+                }
+                if (!flag)
+                {
+                    _ = LogAsync(level, $"ERROR: Fatal error drawing a territory! path = {path}, pos = {pos}, dir = {dir}, branch = {branch}");
                 }
                 return flag;
             }
@@ -917,7 +921,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     selected = territories[parent.Territory.gatewayTo];
                     parent.Territory.gatewayTo = -1;
-                    report.Append($"Selected a set from a mandatory gateway between {parent.Territory} and {selected}");
+                    report.Append($"Selected a set from a mandatory gateway on the parent slot, between {parent.Territory} and {selected}");
                     goto NewSetLoaded;
                 }
             }
@@ -931,7 +935,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 selected = territories[overthere.Territory.gatewayTo];
                 overthere.Territory.gatewayTo = -1;
-                report.Append($"Selected a set from a mandatory gateway between {overthere.Territory} and {selected}");
+                report.Append($"Selected a set from a mandatory gateway on a parallel branch, between {overthere.Territory} and {selected}");
             }
 
             // 2b. If there's a non-sequential, ongoing set loaded there, it takes over
@@ -1004,10 +1008,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 throw new Exception($"Selected domain has a null list! Looking for path {path}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
             }
+            setList.Remove(selected.id);
             if (setList.Count > 1)
             {
-                var queue = setList.Skip(1).ToList();
-                node.staged = new Queue<int>(queue);
+                node.staged = new Queue<int>(setList);
                 isSequence = selectedDomain.IsSequential;
             }
             selectedDomain.Deployed = true;
@@ -1022,7 +1026,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             node.Territory = selected;
 
             //logging
-            setList.Remove(selected.id);
             if (setList.Count > 0) report.Append($", starting with {selected} (remaining: [{string.Join(", ", setList)}])");
             else report.Append($": {selected}");
             //if (overthere != null) report.Append($" PROBE: slot on parallel branch: path={overthere.Path} sequential={overthere.IsSequential} staged=[{string.Join(", ",overthere.staged)}], territory is {overthere.Territory}, reserved: {reservedDomains.Count}");

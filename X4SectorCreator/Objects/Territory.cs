@@ -145,7 +145,7 @@ namespace X4SectorCreator.Objects
                     {
                         sameOwner = true;
                         isXenon = false;
-                        owner = "none";
+                        owner = "neutral";
                     }
                     else
                     {
