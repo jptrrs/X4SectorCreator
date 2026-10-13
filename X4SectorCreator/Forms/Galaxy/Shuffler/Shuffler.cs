@@ -695,7 +695,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 if (!flag)
                 {
-                    _ = LogAsync(level, $"ERROR: Fatal error drawing a territory! path = {path}, pos = {pos}, dir = {dir}, branch = {branch}");
+                    _ = LogAsync(level, $"ERROR: Fatal error drawing a territory! path = {path}, pos = {pos}, dir = {dir}, branch = {branch}, reserved = {reservedDomains.Count}");
                 }
                 return flag;
             }
@@ -924,6 +924,9 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     report.Append($"Selected a set from a mandatory gateway on the parent slot, between {parent.Territory} and {selected}");
                     goto NewSetLoaded;
                 }
+                //else
+                //    _ = LogAsync(MethodBase.GetCurrentMethod().Name,
+                //        $"Nothing on the parent! staged: {(parent.staged.Count>0 ? string.Join(", ",parent.staged) : "zero")}, gatewayTo = {parent.Territory.gatewayTo}.");
             }
 
             // 2. Check what's on the parallel branch
@@ -1009,7 +1012,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 throw new Exception($"Selected domain has a null list! Looking for path {path}, {string.Join("; ", domains.Select(x => $"#{x.Key}=[{string.Join(',', x.Value)}]"))}");
             }
             setList.Remove(selected.id);
-            if (setList.Count > 1)
+            if (setList.Count > 0)
             {
                 node.staged = new Queue<int>(setList);
                 isSequence = selectedDomain.IsSequential;
