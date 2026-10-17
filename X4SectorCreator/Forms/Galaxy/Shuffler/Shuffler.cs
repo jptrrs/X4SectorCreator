@@ -1187,7 +1187,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 Territory selected = null;
                 foreach (var id in domain.Territories)
                 {
-                    if (territories.TryGetValue(id, out selected) && (branching || !selected.IsGateway)) return selected;
+                    if (territories.TryGetValue(id, out selected) && !selected.Gated && (branching || !selected.IsGateway)) return selected;
                 }
                 return selected;
             }
