@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using System.Xml.Linq;
+using X4SectorCreator.Configuration;
 using X4SectorCreator.Forms.Galaxy.Shuffler;
 using X4SectorCreator.Helpers;
 
@@ -12,8 +13,8 @@ namespace X4SectorCreator.Objects
         internal string dlc;
         internal Direction exitDirection;
         internal List<Cluster> absorbedExits = [], bordering = [];
-        internal int id, assignedDomainId, gatewayTo = -1;
-        internal bool isBridge = false, origin = false, toMerge = false, unconnected = false, behindGateway = false;
+        internal int id, assignedDomainId, gatewayTo = -1, gatedFrom = -1;
+        internal bool isBridge = false, origin = false, toMerge = false, unconnected = false, actedOnGateway = false;
         internal Cluster seed;
         internal Point size = Point.Empty;
         internal HashSet<int> neighbors = [];
@@ -35,6 +36,10 @@ namespace X4SectorCreator.Objects
             this.seed = seed;
             dlc = seed.Dlc;
         }
+
+        internal bool Gated => gatedFrom > 0;
+
+        internal bool IsGateway => gatewayTo > 0;
 
         internal List<cPoint> Contour
         {
@@ -207,6 +212,24 @@ namespace X4SectorCreator.Objects
         internal void UpdateLandlockedStatus()
         {
             landlocked = Connections.Count > 0 && Connections.All(x => IsDestinationDomestic(x.destination));
+        }
+
+        internal int InferGateway()
+        {
+            var result = -1;
+            if (Landlocked)
+            {
+                if (Connections.Count == 1)
+                {
+                    result = Connections.First().destination.AssignedTerritoryId;
+                    gatedFrom = result;
+                }
+                else
+                {
+                    _ = Toolbox.LogAsync(MethodBase.GetCurrentMethod().Name, $"{seed} is landlocked but no gateway! toMerge = {toMerge}, {connections.Count()} connections.");
+                }
+            }
+            return result;
         }
 
         internal string Reposition(Point displacement)
