@@ -985,6 +985,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
         private Territory PickNextFromSlot(Slot node, Dictionary<string, Slot> map, HashSet<int> reservedDomains, ref int skipTracker, ref Direction lastXenonSeededBranch, out bool isSequence, out bool isResuming)
         {
+            string level = MethodBase.GetCurrentMethod().Name;
             Territory selected = null;
             isResuming = false;
             isSequence = false;
@@ -994,7 +995,6 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             var path = node.Path;
             var mainBranch = path.GetMainBranch();
             bool branching = path.IsBranching();
-            bool markSequence = false;
 
             // 1. Check what the expectations are on the parent node.
             var parent = node.Parent;
@@ -1046,6 +1046,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                         isSequence = parent.IsSequential;
                         node.Staged = parent.Staged;
                         setList = parent.Staged.ToList();
+                        if (!isFirstborn) AddDomainParallelLine(parent);
                         report.Append(", within the same domain");
                         goto Finalize;
                     }
@@ -1066,6 +1067,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     node.Staged = overthere.Staged;
                     setList = overthere.Staged.ToList();
+                    AddDomainParallelLine(overthere);
                     report.Append($", within the same domain");
                 }
                 else
@@ -1107,6 +1109,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     selected = FromStagedGatewayAware(overthere);
                     node.Staged = overthere.Staged;
                     setList = overthere.Staged.ToList();
+                    AddDomainParallelLine(overthere);
                     report.Append($"Resuming queue from parallel branch ({overthere.Territory})");
                     goto Finalize;
                 }
@@ -1122,7 +1125,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 if (availableSets.Count == 0)
                 {
                     skipTracker++;
-                    _ = LogAsync(MethodBase.GetCurrentMethod().Name,
+                    _ = LogAsync(level,
                         $"Can't fetch a new set because all of them have been deployed already (path {path}).");
                     return null;
                 }
@@ -1144,7 +1147,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             }
                 
             Finalize:
-            node.IsSequential = markSequence;
+            node.IsSequential = isSequence;
             node.Territory = selected;
 
             if (setList.Count > 0)
@@ -1156,10 +1159,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 report.Append($": picked {selected}");
             }
             if (overthere != null)
-                report.Append($"\nPROBE: slot on parallel branch: path={overthere.Path} sequential={overthere.IsSequential} staged=[{string.Join(", ", overthere.Staged)}], territory is {overthere.Territory}, reserved: {reservedDomains.Count}");
+                report.Append($"\nPROBE: slot on parallel branch: path={overthere.Path} sequential={overthere.IsSequential} staged=[{string.Join(", ", overthere.Staged)}], territory is {overthere.Territory}, reserved: {reservedDomains.Count}, domain spread over {DomainParallelLines(overthere)} parallel lines");
             if (parent != null)
-                report.Append($"\nPROBE: slot on parent branch: path={parent.Path} sequential={parent.IsSequential} staged=[{string.Join(", ", parent.Staged)}], territory is {parent.Territory}, reserved: {reservedDomains.Count}");
-            _ = LogAsync(MethodBase.GetCurrentMethod().Name, report.ToString() + ".", true);
+                report.Append($"\nPROBE: slot on parent branch: path={parent.Path} sequential={parent.IsSequential} staged=[{string.Join(", ", parent.Staged)}], territory is {parent.Territory}, reserved: {reservedDomains.Count}, domain spread over {DomainParallelLines(parent)} parallel lines");
+            _ = LogAsync(level, report.ToString() + ".", true);
             return selected;
 
             //This will retrieve the next queued territory that doesn't risk blocking that branch.
@@ -1168,19 +1171,21 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 Territory selected = territories[reference.Staged.Dequeue()];
                 var queueCount = reference.Staged.Count;
-                if (queueCount > 0 && !branching)
+                bool singleLine = DomainParallelLines(reference) == 0;
+                if (queueCount > 0 && !branching && singleLine)
                 {
-                    int i = queueCount;
+                    int i = queueCount + 1;
                     while (selected.IsGateway && i > 0)
                     {
                         reference.Staged.Enqueue(selected.id);
                         selected = territories[reference.Staged.Dequeue()];
                         i--;
                     }
-                    // This is an edge case, but possible. Solving it takes a hasty edit to the stage.
+                    // This is an edge case, but possible. It can box in a domain and prevent chained links from spawning. Solving it takes a hasty edit to the stage.
                     if (i == 0 && selected.IsGateway)
                     {
                         List<int> currentStage = reference.Staged.ToList();
+                        _ = LogAsync(level, $"WARNING: special case triggered for {reference.Territory}, trying to collapese expected gated territories into the regular queue...");
                         foreach (var gateway in currentStage)
                         {
                             var gatewayOnHold = territories[gateway];
@@ -1190,6 +1195,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                                 reference.Staged.Enqueue(gatewayOnHold.gatewayTo);
                                 gatedOnHold.gatedFrom = -1;
                                 gatewayOnHold.gatewayTo = -1;
+                                _ = LogAsync(level, $"...pulled #{gatedOnHold.id} - {gatedOnHold}.");
                             }
                         }
                     }
@@ -1235,6 +1241,18 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 }
                 return flagSequence;
             }
+        }
+
+        private void AddDomainParallelLine(Slot node)
+        {
+            if (!domains.TryGetValue(node.AssignedDomainId, out var domain)) return;
+            domain.parallelLines++;
+        }
+
+        private int DomainParallelLines(Slot node)
+        {
+            if (!domains.TryGetValue(node.AssignedDomainId, out var domain)) return 0;
+            return domain.parallelLines;
         }
 
         private Slot SlotOnParallelBranch(Dictionary<string, Slot> map, string path)
@@ -1408,8 +1426,15 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
 
             //4. Drift, if possible, around the center
             int fixedDrift = isSequence ? 1 : 0;
-            if (dir != GetDriftDirection(offset) && Drift(offset, out drift, fixedDrift))
+            driftDir = GetDriftDirection(offset);
+            if (dir != driftDir && Drift(offset, out var rawDrift, fixedDrift))
             {
+                var head = flush.Add(adjust);
+                bool isVerticalDrift = (int)driftDir % 2 == 0;
+                int rawDelta = isVerticalDrift ? rawDrift.Y : rawDrift.X;
+                int headDelta = isVerticalDrift ? head.Y : head.X;
+                int remainingDelta = rawDelta == 0 ? 0 : Math.Sign(rawDelta) * Math.Max(0, Math.Abs(rawDelta) - Math.Sign(rawDelta) * headDelta);
+                drift = isVerticalDrift ? new Point(rawDrift.X, remainingDelta) : new Point(remainingDelta, rawDrift.Y);
                 Point driftedPos = offset.Add(drift);
                 if (!SimpleCollision(occupied, driftedPos, width, height))
                 {
@@ -2002,7 +2027,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     var destinationId = exit.destination.AssignedTerritoryId;
                     bool protectedConnection = IsProtectedConnection(slot.Territory, exit.destination);
-                    if (protectedConnection && localInfo.Family.Contains(destinationId))
+                    //if (protectedConnection && (slot.IsSequential || localInfo.Family.Contains(destinationId)))
+                    if ((slot.IsSequential && protectedConnection) || localInfo.Family.Contains(destinationId))
                     {
                         preserved.Add(exit.gate);
                         localInfo.CheckConnectionTo(destinationId);
@@ -2063,6 +2089,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 int count = 0;
                 var parent = slot.Parent?.Territory;
                 Dictionary<(Cluster from, Cluster to), string> log = [];
+                bool continuousLog = true;
                 if (adHocCriteria(parent) && !localInfo.goesToParent)
                 {
                     if (AttemptConnection(origin, parent, "parent slot", log)) count++;
@@ -2091,7 +2118,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     if (!AttemptConnection(origin, parent, "fallback to parent slot", log, false))
                     {
-                        log2.AppendLine($"could not reconnect at all! Parent = {parent}.");
+                        log2.AppendLine($"could not reconnect at all! Parent = {parent}, olderParallel = {olderParallel}, youngerParallel = {youngerParallel}.");
+                        continuousLog = false;
                     }
                 }
                 if (count > 0)
@@ -2099,7 +2127,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     List<string> reportList = log.Select(e => $"{e.Key.from.Name} -> {e.Key.to.Name} ({e.Value})").ToList();
                     log2.AppendLine($"new connections: {string.Join(", ", reportList)}.");
                 }
-                else log2.AppendLine($"no new connections.");
+                else if (continuousLog) log2.AppendLine($"no new connections.");
             }
             _ = LogAsync(level, log2.ToString(), true);
 
@@ -2158,6 +2186,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             internal bool IsXenon { get; set; }
             internal bool Deployed { get; set; }
             internal bool IsColonySet { get; set; }
+            internal int parallelLines { get; set; }
 
             private bool divided;
             private bool? isNeutral;
