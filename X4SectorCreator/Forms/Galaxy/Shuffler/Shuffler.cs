@@ -1287,6 +1287,38 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             return null;
         }
 
+        private Slot SlotOnDiagonalAnterior(Dictionary<string, Slot> map, string path)
+        {
+            if (path.Length > 2 && !path.IsBranching())
+            {
+                var diagonal = path.GetDiagonalAnterior();
+                if (!string.IsNullOrEmpty(diagonal))
+                {
+                    if (map.ContainsKey(diagonal))
+                    {
+                        return map[diagonal];
+                    }
+                }
+            }
+            return null;
+        }
+
+        private Slot SlotOnDiagonalPosterior(Dictionary<string, Slot> map, string path)
+        {
+            if (path.Length > 2 && !path.IsBranching())
+            {
+                var diagonal = path.GetDiagonalPosterior();
+                if (!string.IsNullOrEmpty(diagonal))
+                {
+                    if (map.ContainsKey(diagonal))
+                    {
+                        return map[diagonal];
+                    }
+                }
+            }
+            return null;
+        }
+
         private void UpdateClusterMap(List<Cluster> clusters, List<Cluster> misplaced)
         {
             foreach (var c in clusters)
@@ -2017,8 +2049,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             {
                 slot.Surroundings = new(slot)
                 {
-                    olderCousin = SlotOnParallelBranch(map, slot.Path),
-                    youngerCousin = SlotOnParallelYoungerBranch(map, slot.Path)
+                    olderParallel = SlotOnParallelBranch(map, slot.Path),
+                    youngerParallel = SlotOnParallelYoungerBranch(map, slot.Path),
+                    olderDiagonal = SlotOnDiagonalAnterior(map, slot.Path),
+                    youngerDiagonal = SlotOnDiagonalPosterior(map, slot.Path)
                 };
                 if (slot.Territory.unconnected) continue;
                 var localInfo = slot.Surroundings;
@@ -2094,26 +2128,44 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 {
                     if (AttemptConnection(origin, parent, "parent slot", log)) count++;
                 }
-                var olderParallel = localInfo.olderCousin?.Territory;
-                if (adHocCriteria(olderParallel) && !localInfo.goesToOlderCousin)
+                var olderParallel = localInfo.olderParallel?.Territory;
+                if (adHocCriteria(olderParallel) && !localInfo.goesToOlderParallel)
                 {
-                    if (AttemptConnection(origin, localInfo.olderCousin.Territory, "older parallel branch", log))
+                    if (AttemptConnection(origin, localInfo.olderParallel.Territory, "older parallel branch", log))
                     {
-                        localInfo.olderCousin.Surroundings.CheckConnectionTo(origin.id);
+                        localInfo.olderParallel.Surroundings.CheckConnectionTo(origin.id);
                         count++;
                     }
                 }
-                var youngerParallel = localInfo.youngerCousin?.Territory;
-                if (adHocCriteria(youngerParallel) && !localInfo.goesToYoungerCousin)
+                var youngerParallel = localInfo.youngerParallel?.Territory;
+                if (adHocCriteria(youngerParallel) && !localInfo.goesToYoungerParallel)
                 {
-                    if (AttemptConnection(origin, localInfo.youngerCousin.Territory, "younger parallel branch", log))
+                    if (AttemptConnection(origin, localInfo.youngerParallel.Territory, "younger parallel branch", log))
                     {
-                        localInfo.youngerCousin.Surroundings.CheckConnectionTo(origin.id);
+                        localInfo.youngerParallel.Surroundings.CheckConnectionTo(origin.id);
+                        count++;
+                    }
+                }
+                var olderDiagonal = localInfo.olderDiagonal?.Territory;
+                if (adHocCriteria(olderDiagonal) && !localInfo.goesToOlderDiagonal)
+                {
+                    if (AttemptConnection(origin, localInfo.olderDiagonal.Territory, "older diagonal slot", log))
+                    {
+                        localInfo.olderDiagonal.Surroundings.CheckConnectionTo(origin.id);
+                        count++;
+                    }
+                }
+                var youngerDiagonal = localInfo.youngerDiagonal?.Territory;
+                if (adHocCriteria(youngerDiagonal) && !localInfo.goesToYoungerDiagonal)
+                {
+                    if (AttemptConnection(origin, localInfo.youngerDiagonal.Territory, "younger diagonal slot", log))
+                    {
+                        localInfo.youngerDiagonal.Surroundings.CheckConnectionTo(origin.id);
                         count++;
                     }
                 }
                 log2.Append($"#{origin.id} - {origin}: ");
-                bool preConnected = localInfo.goesToParent || localInfo.goesToOlderCousin;
+                bool preConnected = localInfo.goesToParent || localInfo.goesToOlderParallel;
                 if (!preConnected && adHocCriteria(parent) && count == 0)
                 {
                     if (!AttemptConnection(origin, parent, "fallback to parent slot", log, false))
@@ -2269,8 +2321,8 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                 parent = slot.Parent?.Territory;
             }
 
-            internal required Slot olderCousin, youngerCousin;
-            internal bool goesToParent, goesToOlderCousin, goesToYoungerCousin; //Preserved connections:
+            internal required Slot olderParallel, youngerParallel, olderDiagonal, youngerDiagonal;
+            internal bool goesToParent, goesToOlderParallel, goesToYoungerParallel, goesToOlderDiagonal, goesToYoungerDiagonal; //Preserved connections:
             private Territory parent;
             private Slot reference;
             List<int> family = [];
@@ -2282,8 +2334,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
                     if (family.Count == 0)
                     {
                         if (parent != null) family.Add(parent.id);
-                        if (olderCousin?.Territory != null) family.Add(olderCousin.Territory.id);
-                        if (youngerCousin?.Territory != null) family.Add(youngerCousin.Territory.id);
+                        if (olderParallel?.Territory != null) family.Add(olderParallel.Territory.id);
+                        if (youngerParallel?.Territory != null) family.Add(youngerParallel.Territory.id);
+                        if (olderDiagonal?.Territory != null) family.Add(olderDiagonal.Territory.id);
+                        if (youngerDiagonal?.Territory != null) family.Add(youngerDiagonal.Territory.id);
                         if (reference.Children.Count > 0)
                         {
                             foreach (var child in reference.Children)
@@ -2299,8 +2353,10 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             internal void CheckConnectionTo(int destinationId)
             {
                 if (!goesToParent && parent != null && destinationId == parent.id) goesToParent = true;
-                else if (!goesToOlderCousin && olderCousin?.Territory != null && destinationId == olderCousin.Territory.id) goesToOlderCousin = true;
-                else if (!goesToYoungerCousin && youngerCousin?.Territory != null && destinationId == youngerCousin.Territory.id) goesToYoungerCousin = true;
+                else if (!goesToOlderParallel && olderParallel?.Territory != null && destinationId == olderParallel.Territory.id) goesToOlderParallel = true;
+                else if (!goesToYoungerParallel && youngerParallel?.Territory != null && destinationId == youngerParallel.Territory.id) goesToYoungerParallel = true;
+                else if (!goesToOlderDiagonal && olderDiagonal?.Territory != null && destinationId == olderDiagonal.Territory.id) goesToOlderDiagonal = true;
+                else if (!goesToYoungerDiagonal && youngerDiagonal?.Territory != null && destinationId == youngerDiagonal.Territory.id) goesToYoungerDiagonal = true;
             }
 
         }

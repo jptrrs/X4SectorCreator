@@ -63,6 +63,19 @@
             return path[0] + path;
         }
 
+        public static string GetDiagonalAnterior(this string path)
+        {
+            if (string.IsNullOrEmpty(path) || path.Length == 1) return "";
+            return path[0] + path.Substring(0,path.Length - 1);
+        }
+
+        public static string GetDiagonalPosterior(this string path)
+        {
+            if (string.IsNullOrEmpty(path) || path.Length == 1) return "";
+            return path.Substring(1) + path[path.Length - 1];
+
+        }
+
         public static bool IsBranching(this string path)
         {
             return path.GetMainBranch() == path.GetDirection();
