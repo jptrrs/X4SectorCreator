@@ -9,7 +9,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
         {
             { "hatikvah", "argon" },
             { "antigone", "argon" },
-            { "pioneers", "terran" }
+            //{ "pioneers", "terran" } //replaced with a mandatory Gateway from Neptune
         };
 
         internal static Dictionary<string, string> ObligateNeighborFactions = new(StringComparer.OrdinalIgnoreCase)
@@ -22,6 +22,7 @@ namespace X4SectorCreator.Forms.Galaxy.Shuffler
             // Order matters. The second cluster and the territory behind it will be pushed out.
             { "Heretic's End", "Watchful Gaze" },
             { "Getsu Fune", "Asteroid Belt" },
+            { "Neptune", "Brennan's Triumph" },
             { "Ianamus Zura", "Mitsuno's Revelation" }
         };
 

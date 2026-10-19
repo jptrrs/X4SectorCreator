@@ -63,6 +63,11 @@
             return path[0] + path;
         }
 
+        public static bool IsBranching(this string path)
+        {
+            return path.GetMainBranch() == path.GetDirection();
+        }
+
         public static Direction OppositeDir(this Direction given)
         {
             if (given == Direction.Undefined) return given;

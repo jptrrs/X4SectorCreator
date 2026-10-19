@@ -1,6 +1,4 @@
 ﻿using System.Reflection;
-using System.Xml.Linq;
-using X4SectorCreator.Configuration;
 using X4SectorCreator.Forms.Galaxy.Shuffler;
 using X4SectorCreator.Helpers;
 
@@ -182,6 +180,8 @@ namespace X4SectorCreator.Objects
             }
             return ownerships;
         }
+
+        internal bool LockedConnections => unconnected || Landlocked;
 
         internal bool IsXenon => SameOwner && (bool)isXenon;
 
